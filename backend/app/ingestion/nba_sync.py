@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from nba_api.stats.endpoints import (
@@ -17,6 +18,7 @@ from nba_api.stats.endpoints import (
     boxscoretraditionalv3,
     commonteamroster,
     leaguegamefinder,
+    scoreboardv3,
 )
 from nba_api.stats.static import teams as static_teams
 from sqlalchemy import select
@@ -28,6 +30,7 @@ from app.ingestion.minutes import normalize_stat_int, parse_minutes
 logger = logging.getLogger(__name__)
 
 REQUEST_PAUSE_SEC = 0.65
+NBA_CALENDAR_TZ = ZoneInfo("America/New_York")
 
 
 def _pause() -> None:
@@ -117,22 +120,46 @@ def _resolve_home_away_team_ids(game_rows: pd.DataFrame) -> tuple[int, int]:
     raise ValueError(f"unrecognized MATCHUP format: {m0!r}")
 
 
+def _parse_game_date(gd_raw: object) -> date:
+    if isinstance(gd_raw, str):
+        return datetime.strptime(gd_raw, "%Y-%m-%d").date()
+    return pd.Timestamp(gd_raw).date()
+
+
 def sync_games_from_finder(
     session: Session,
     season: str,
     regular_only: bool,
     teams_by_nba: dict[int, Team],
     max_games: int | None,
+    *,
+    recent_first: bool = False,
 ) -> tuple[dict[str, Game], list[str]]:
     """Insert/update Game rows from LeagueGameFinder (deduped by NBA GAME_ID).
 
-    Returns mapping nba_game_id -> Game and a stable-ordered list of ids for stats ingestion.
+    When ``max_games`` is set, by default the first N game IDs (sorted lexically) are
+    used — often early-season games. With ``recent_first=True``, the N games with
+    the latest ``GAME_DATE`` are used instead (better for dev datasets).
+
+    Returns mapping nba_game_id -> Game and an ordered list of ids for stats ingestion
+    (same order as the filtered ``game_ids`` list, minus any skipped games).
     """
     df = load_season_game_rows(season, regular_only)
     df["GAME_ID"] = df["GAME_ID"].astype(str)
-    game_ids = sorted(df["GAME_ID"].unique().tolist())
+    all_ids = sorted(df["GAME_ID"].unique().tolist())
     if max_games is not None:
-        game_ids = game_ids[:max_games]
+        if recent_first:
+            dated: list[tuple[str, date]] = []
+            for gid in all_ids:
+                gdf = df[df["GAME_ID"] == gid]
+                gd_raw = gdf.iloc[0]["GAME_DATE"]
+                dated.append((gid, _parse_game_date(gd_raw)))
+            dated.sort(key=lambda t: (t[1], t[0]), reverse=True)
+            game_ids = [d[0] for d in dated[:max_games]]
+        else:
+            game_ids = all_ids[:max_games]
+    else:
+        game_ids = all_ids
 
     games_by_nba_id: dict[str, Game] = {}
     for gid in game_ids:
@@ -148,10 +175,7 @@ def sync_games_from_finder(
             logger.warning("Skip game %s: unknown team id(s) %s %s", gid, home_nba, away_nba)
             continue
         gd_raw = gdf.iloc[0]["GAME_DATE"]
-        if isinstance(gd_raw, str):
-            game_date = datetime.strptime(gd_raw, "%Y-%m-%d").date()
-        else:
-            game_date = pd.Timestamp(gd_raw).date()
+        game_date = _parse_game_date(gd_raw)
 
         existing = session.scalar(select(Game).where(Game.nba_game_id == gid))
         if existing is None:
@@ -171,8 +195,101 @@ def sync_games_from_finder(
 
     session.flush()
     logger.info("Synced %d games from LeagueGameFinder", len(games_by_nba_id))
-    order = sorted(games_by_nba_id.keys())
+    order = [gid for gid in game_ids if gid in games_by_nba_id]
     return games_by_nba_id, order
+
+
+def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], *, days: int) -> list[Game]:
+    """Upsert games from Stats ``ScoreboardV3`` for ``days`` consecutive NBA Eastern calendar days starting today.
+
+    Covers same-day and upcoming games that ``LeagueGameFinder`` may omit or lag on.
+    Team line rows list **home first**, **away second** (validated against ``gameCode``).
+    """
+    if days < 1:
+        raise ValueError("days must be >= 1")
+
+    today = datetime.now(NBA_CALENDAR_TZ).date()
+    touched: list[Game] = []
+
+    for offset in range(days):
+        slate = today + timedelta(days=offset)
+        date_str = slate.isoformat()
+        _pause()
+        try:
+            sb = scoreboardv3.ScoreboardV3(game_date=date_str)
+            dfs = sb.get_data_frames()
+        except Exception as exc:
+            logger.warning("Scoreboard fetch failed for %s: %s", date_str, exc)
+            continue
+
+        if len(dfs) < 3 or dfs[1] is None or dfs[1].empty:
+            logger.debug("Scoreboard: no games header rows on %s", date_str)
+            continue
+
+        games_hdr = dfs[1]
+        teams_lines = dfs[2]
+        if teams_lines is None or teams_lines.empty:
+            logger.warning("Scoreboard: missing team lines on %s", date_str)
+            continue
+
+        games_hdr = games_hdr.copy()
+        games_hdr["gameId"] = games_hdr["gameId"].astype(str).str.strip()
+        teams_lines = teams_lines.copy()
+        teams_lines["gameId"] = teams_lines["gameId"].astype(str).str.strip()
+
+        for _, hdr in games_hdr.iterrows():
+            nba_gid = str(hdr["gameId"]).strip()
+            status_txt = str(hdr.get("gameStatusText") or "").strip()[:64] or "scheduled"
+
+            sub = teams_lines[teams_lines["gameId"] == nba_gid]
+            if len(sub) != 2:
+                logger.warning(
+                    "Scoreboard: skip game %s on %s: expected 2 team rows, got %d",
+                    nba_gid,
+                    date_str,
+                    len(sub),
+                )
+                continue
+
+            home_nba_id = int(sub.iloc[0]["teamId"])
+            away_nba_id = int(sub.iloc[1]["teamId"])
+
+            home = teams_by_nba.get(home_nba_id)
+            away = teams_by_nba.get(away_nba_id)
+            if home is None or away is None:
+                logger.warning(
+                    "Scoreboard: skip game %s on %s: unknown team home=%s away=%s",
+                    nba_gid,
+                    date_str,
+                    home_nba_id,
+                    away_nba_id,
+                )
+                continue
+
+            existing = session.scalar(select(Game).where(Game.nba_game_id == nba_gid))
+            if existing is None:
+                existing = Game(
+                    nba_game_id=nba_gid,
+                    home_team_id=home.id,
+                    away_team_id=away.id,
+                    game_date=slate,
+                    status=status_txt,
+                )
+                session.add(existing)
+            else:
+                existing.home_team_id = home.id
+                existing.away_team_id = away.id
+                existing.status = status_txt[:64]
+
+            touched.append(existing)
+
+    session.flush()
+    logger.info(
+        "Scoreboard sync processed %d game row touch(es) over %d Eastern day(s)",
+        len(touched),
+        days,
+    )
+    return touched
 
 
 def _summary_status(game_id: str) -> str | None:
@@ -302,6 +419,8 @@ def run_full_ingest(
     season: str,
     regular_only: bool,
     max_games: int | None,
+    recent_first: bool,
+    scoreboard_days: int | None,
     skip_rosters: bool,
     skip_games: bool,
     skip_stats: bool,
@@ -313,20 +432,45 @@ def run_full_ingest(
         sync_rosters(session, season, teams_by_nba)
         session.commit()
 
-    if skip_games:
-        return
+    games_map: dict[str, Game] = {}
+    game_order: list[str] = []
 
-    games_map, game_order = sync_games_from_finder(
-        session, season, regular_only, teams_by_nba, max_games
-    )
-    session.commit()
+    if not skip_games:
+        games_map, game_order = sync_games_from_finder(
+            session,
+            season,
+            regular_only,
+            teams_by_nba,
+            max_games,
+            recent_first=recent_first,
+        )
+        session.commit()
+
+    scoreboard_games: list[Game] = []
+    if scoreboard_days is not None and scoreboard_days > 0:
+        scoreboard_games = sync_games_from_scoreboard(session, teams_by_nba, days=scoreboard_days)
+        session.commit()
 
     if skip_stats:
         return
 
+    seen_nba: set[str] = set()
     total_stats = 0
+
     for gid in game_order:
         game = games_map[gid]
+        seen_nba.add(game.nba_game_id)
+        try:
+            total_stats += ingest_box_score_for_game(session, game)
+            session.commit()
+        except Exception:
+            logger.exception("Failed ingesting box score for game %s", game.nba_game_id)
+            session.rollback()
+
+    for game in scoreboard_games:
+        if game.nba_game_id in seen_nba:
+            continue
+        seen_nba.add(game.nba_game_id)
         try:
             total_stats += ingest_box_score_for_game(session, game)
             session.commit()

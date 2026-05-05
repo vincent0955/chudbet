@@ -1,6 +1,8 @@
 # Chudbet
 
-Monorepo for a sports analytics web app. This repository contains a FastAPI backend, a React (Vite) frontend scaffold, and Docker Compose for local development with PostgreSQL.
+Are you tired of your parlays always missing by one leg? Bet on your parlays NOT hitting with ChudBet. 
+
+This repository contains a FastAPI backend, a React (Vite) frontend scaffold, and Docker Compose for local development with PostgreSQL.
 
 ## Layout
 
@@ -80,7 +82,8 @@ From `backend/` with `POSTGRES_*` or `DATABASE_URL` pointing at your database:
 
 ```bash
 pip install -r requirements.txt
-python -m app.ingestion.cli --season 2025-26 --max-games 5
+# Dev-sized sample: latest ~80 games + box scores (good for frontend testing)
+python -m app.ingestion.cli --season 2025-26 --max-games 80 --recent-first
 ```
 
 Useful flags:
@@ -88,9 +91,20 @@ Useful flags:
 | Flag | Meaning |
 |------|---------|
 | `--playoffs` | Use playoffs instead of regular season for the schedule query |
-| `--max-games N` | Only process the first N games (sorted by NBA `GAME_ID`) — good for smoke tests |
+| `--max-games N` | Only process N games from LeagueGameFinder (default order: lowest `GAME_ID` first) |
+| `--recent-first` | With `--max-games`, use the N games with the **latest** `GAME_DATE` (recommended for dev samples) |
 | `--skip-stats` | Sync teams, rosters, and game rows only (no box-score calls) |
-| `--skip-rosters` / `--skip-games` | Narrower partial runs |
+| `--scoreboard-days N` | Also upsert games from **ScoreboardV3** for **N** consecutive **Eastern** calendar days starting **today** (today + near-future slate; works with or without LeagueGameFinder) |
+| `--skip-rosters` / `--skip-games` | Narrower partial runs (`--skip-games` skips finder only; pair with `--scoreboard-days` for a lightweight slate refresh) |
+
+Omit `--max-games` to pull **all** games for the season (slow; many NBA HTTP calls).
+
+**Upcoming games (e.g. next 3 days)** — merge scoreboard days after your usual finder pull, or refresh slate only:
+
+```bash
+python -m app.ingestion.cli --season 2025-26 --max-games 80 --recent-first --scoreboard-days 3 --skip-stats
+python -m app.ingestion.cli --season 2025-26 --skip-games --skip-stats --scoreboard-days 3
+```
 
 The Docker image for the API **does not include** `app/ingestion/` (some Windows/Docker BuildKit setups fail to build when that folder is in the image context). Run the CLI **on your machine** with Postgres reachable on `localhost` (Compose publishes Postgres on port **5432**):
 
@@ -98,7 +112,7 @@ The Docker image for the API **does not include** `app/ingestion/` (some Windows
 cd backend
 pip install -r requirements.txt
 $env:POSTGRES_HOST = "localhost"
-python -m app.ingestion.cli --season 2025-26 --max-games 3
+python -m app.ingestion.cli --season 2025-26 --max-games 80 --recent-first
 ```
 
 The script spaces out HTTP calls (~0.65s) to reduce load on NBA.com.

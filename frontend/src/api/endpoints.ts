@@ -34,6 +34,10 @@ export function listGames(options?: { limit?: number; offset?: number }) {
   return apiRequest<GameRead[]>(`/games${query({ limit: options?.limit, offset: options?.offset })}`)
 }
 
+export function getGame(gameId: number) {
+  return apiRequest<GameRead>(`/games/${gameId}`)
+}
+
 export function listPlayerStats(playerId: number, options?: { limit?: number; offset?: number }) {
   return apiRequest<PlayerGameStatRead[]>(
     `/players/${playerId}/stats${query({ limit: options?.limit, offset: options?.offset })}`,

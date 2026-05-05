@@ -38,7 +38,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         metavar="N",
-        help="Limit to the first N games (after sorting by GAME_ID) for faster trial runs.",
+        help="Limit to N games from LeagueGameFinder (default order: lowest GAME_ID first).",
+    )
+    parser.add_argument(
+        "--recent-first",
+        action="store_true",
+        help="With --max-games, take the N games with the latest GAME_DATE (best for a current-season dev sample).",
     )
     parser.add_argument(
         "--skip-rosters",
@@ -48,12 +53,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--skip-games",
         action="store_true",
-        help="Stop after rosters (no LeagueGameFinder games).",
+        help="Skip LeagueGameFinder (teams/rosters still run; use with --scoreboard-days for slate-only pulls).",
     )
     parser.add_argument(
         "--skip-stats",
         action="store_true",
         help="Sync teams/rosters/games but skip per-game box scores.",
+    )
+    parser.add_argument(
+        "--scoreboard-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "After LeagueGameFinder (unless --skip-games), upsert games from ScoreboardV3 for "
+            "N consecutive NBA Eastern calendar days starting today (good for today + upcoming slate)."
+        ),
     )
     parser.add_argument(
         "-v",
@@ -62,6 +77,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Debug logging.",
     )
     args = parser.parse_args(argv)
+
+    if args.recent_first and args.max_games is None:
+        parser.error("--recent-first only applies together with --max-games")
+
+    if args.scoreboard_days is not None and args.scoreboard_days < 1:
+        parser.error("--scoreboard-days must be >= 1")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -80,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
             season=args.season,
             regular_only=regular_only,
             max_games=args.max_games,
+            recent_first=args.recent_first,
+            scoreboard_days=args.scoreboard_days,
             skip_rosters=args.skip_rosters,
             skip_games=args.skip_games,
             skip_stats=args.skip_stats,
