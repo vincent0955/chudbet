@@ -114,3 +114,37 @@ export interface ParlayRead {
 export interface HealthResponse {
   status: string
 }
+
+export interface AccountRead {
+  id: number
+  /** ISO timestamps from Postgres timestamptz. */
+  created_at: string
+  balance_cents: number
+}
+
+export type WagerStatus = 'open' | 'won' | 'lost' | 'void' | 'cancelled'
+
+export interface WagerRead {
+  id: number
+  created_at: string
+  account_id: number
+  parlay_id: number
+  stake_cents: number
+  offered_decimal_odds: number
+  potential_return_cents: number
+  status: WagerStatus
+}
+
+export interface WagerPlaceBody {
+  stake_cents: number
+  offered_decimal_odds?: number | null
+  idempotency_key?: string | null
+  parlay: ParlayCreate
+}
+
+export interface WagerDetailResponse {
+  wager: WagerRead
+  account: AccountRead
+  parlay: ParlayRead
+  duplicated: boolean
+}

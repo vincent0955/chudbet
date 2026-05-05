@@ -12,6 +12,7 @@ from app.db.enums import ParlayMode
 
 if TYPE_CHECKING:
     from app.db.models.parlay_leg import ParlayLeg
+    from app.db.models.wager import Wager
 
 
 class Parlay(Base):
@@ -64,4 +65,9 @@ class Parlay(Base):
         back_populates="parlay",
         cascade="all, delete-orphan",
         order_by="ParlayLeg.sort_order",
+    )
+    wager: Mapped["Wager | None"] = relationship(
+        "Wager",
+        back_populates="parlay",
+        uselist=False,
     )

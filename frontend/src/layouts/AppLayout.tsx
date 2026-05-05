@@ -1,10 +1,15 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { BetSlip } from '../components/BetSlip'
+import { HeaderWallet } from '../components/HeaderWallet'
 
 function showBetSlipPath(pathname: string): boolean {
   if (pathname === '/' || pathname === '') return true
   const parts = pathname.split('/').filter(Boolean)
   return parts.length === 2 && parts[0] === 'games'
+}
+
+function myBetsNavActive(pathname: string, isActiveLink: boolean): boolean {
+  return isActiveLink || pathname.startsWith('/bets')
 }
 
 export function AppLayout() {
@@ -28,7 +33,18 @@ export function AppLayout() {
             >
               Home
             </NavLink>
+            <NavLink
+              to="/bets/open"
+              className={({ isActive }) =>
+                `app-nav__link${myBetsNavActive(pathname, isActive) ? ' app-nav__link--active' : ''}`
+              }
+            >
+              My bets
+            </NavLink>
           </nav>
+        </div>
+        <div className="app-header__right">
+          <HeaderWallet />
         </div>
       </header>
 

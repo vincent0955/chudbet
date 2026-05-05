@@ -1,6 +1,7 @@
 import { useId, useMemo, useState, type FormEvent } from 'react'
 import type { LegIn, PlayerGameStatRead, StatType } from '../../api/types'
 import { useBetSlip } from '../../context/BetSlipContext'
+import { formatAmericanOdds, parseAmericanOddsString } from '../../utils/parlayOdds'
 import { formatGameDate, formatStat } from './format'
 
 const STAT_TYPES: StatType[] = ['PTS', 'REB', 'AST']
@@ -26,11 +27,12 @@ function directionLabel(d: LegIn['direction']): string {
 
 export function LegPickerForm({ playerId, playerName, teamName, stats, preferredGameId }: Props) {
   const formId = useId()
-  const { addLeg } = useBetSlip()
+  const { addLeg, hasLeg } = useBetSlip()
 
   const [statType, setStatType] = useState<StatType>('PTS')
   const [direction, setDirection] = useState<LegIn['direction']>('OVER')
   const [line, setLine] = useState('20.5')
+  const [americanInput, setAmericanInput] = useState('')
   /** `undefined` = follow preferred URL / empty default; otherwise user-picked value including "" for any game */
   const [gameIdUser, setGameIdUser] = useState<string | undefined>(undefined)
   const [submitErr, setSubmitErr] = useState<string | null>(null)
@@ -76,6 +78,19 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
       direction,
     }
 
+    const oppositeLeg: LegIn = {
+      ...leg,
+      direction: direction === 'OVER' ? 'UNDER' : 'OVER',
+    }
+    if (hasLeg(leg)) {
+      setSubmitErr('This exact leg is already on your slip.')
+      return
+    }
+    if (hasLeg(oppositeLeg)) {
+      setSubmitErr('The opposite side of this prop is already on your slip.')
+      return
+    }
+
     const col = statColumn(statType)
     const sample = stats.find((s) => (gid == null ? true : s.game_id === gid))
     const refVal = sample?.[col]
@@ -84,7 +99,19 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
         ? `Last in row: ${formatStat(typeof refVal === 'number' ? refVal : Number(refVal))} ${statType}`
         : undefined
 
-    const primary = `${playerName} · ${statType} ${directionLabel(direction)} ${parsed}`
+    let americanOdds: number | null = null
+    const oddsTrim = americanInput.trim()
+    if (oddsTrim) {
+      const p = parseAmericanOddsString(oddsTrim)
+      if (p == null) {
+        setSubmitErr('American odds must look like -110 or +240.')
+        return
+      }
+      americanOdds = p
+    }
+
+    const primaryOddsSuffix = americanOdds != null ? ` (${formatAmericanOdds(americanOdds)})` : ''
+    const primary = `${playerName} · ${statType} ${directionLabel(direction)} ${parsed}${primaryOddsSuffix}`
     const gameRow = gid != null ? gameOptions.find((o) => o.game_id === gid) : undefined
     const secondary = [
       teamName,
@@ -94,7 +121,7 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
       .filter(Boolean)
       .join(' · ')
 
-    addLeg(leg, { primary, secondary })
+    addLeg(leg, { primary, secondary }, americanOdds)
   }
 
   return (
@@ -148,6 +175,19 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
             value={line}
             onChange={(e) => setLine(e.target.value)}
             required
+          />
+        </label>
+
+        <label className="leg-form__field">
+          <span className="leg-form__label">American odds (optional)</span>
+          <input
+            className="leg-form__input"
+            type="text"
+            inputMode="text"
+            placeholder="e.g. -114"
+            value={americanInput}
+            onChange={(e) => setAmericanInput(e.target.value)}
+            autoComplete="off"
           />
         </label>
 

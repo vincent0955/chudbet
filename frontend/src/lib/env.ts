@@ -11,3 +11,14 @@ export function getApiBaseUrl(): string {
   }
   return DEFAULT_DEV_API
 }
+
+/**
+ * Configured wallet account id (must match a row in `accounts`). When unset or invalid, returns null.
+ */
+export function getConfiguredAccountId(): number | null {
+  const raw = import.meta.env.VITE_ACCOUNT_ID
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null
+  const n = Number.parseInt(String(raw).trim(), 10)
+  if (!Number.isFinite(n) || n < 1) return null
+  return n
+}

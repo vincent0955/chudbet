@@ -1,4 +1,5 @@
 import type { GamePropLinesBundle, PlayerPropLinesRead, StatType } from '../../api/types'
+import { parseAmericanOddsString } from '../../utils/parlayOdds'
 import { useBetSlip } from '../../context/BetSlipContext'
 import { formatGameDate, formatHalfPointLine } from '../browse/format'
 
@@ -47,34 +48,64 @@ function PropPickButtons({
   overAmerican: string
   underAmerican: string
 }) {
-  const { addLeg } = useBetSlip()
+  const { addLeg, hasLeg, removeLegByLeg } = useBetSlip()
   const lineLabel = formatHalfPointLine(line)
+  const overLeg = {
+    player_id: player.id,
+    game_id: gameId,
+    stat_type: stat,
+    line,
+    direction: 'OVER' as const,
+  }
+  const underLeg = {
+    player_id: player.id,
+    game_id: gameId,
+    stat_type: stat,
+    line,
+    direction: 'UNDER' as const,
+  }
+  const overSelected = hasLeg(overLeg)
+  const underSelected = hasLeg(underLeg)
 
-  const add = (direction: 'OVER' | 'UNDER') => {
+  const toggle = (direction: 'OVER' | 'UNDER') => {
+    const leg = direction === 'OVER' ? overLeg : underLeg
+    const opposite = direction === 'OVER' ? underLeg : overLeg
+    if (hasLeg(leg)) {
+      removeLegByLeg(leg)
+      return
+    }
+    if (hasLeg(opposite)) {
+      removeLegByLeg(opposite)
+    }
     const odds = direction === 'OVER' ? overAmerican : underAmerican
     addLeg(
-      {
-        player_id: player.id,
-        game_id: gameId,
-        stat_type: stat,
-        line,
-        direction,
-      },
+      leg,
       {
         primary: `${player.full_name} · ${stat} ${directionLabel(direction)} ${lineLabel} (${odds})`,
         secondary: `${player.team_name} · ${gameDateLabel} · Proj. last ${samplesLen} games`,
       },
+      parseAmericanOddsString(odds),
     )
   }
 
   return (
     <div className="game-props__ou">
-      <button type="button" className="game-props__ou-btn" onClick={() => add('OVER')}>
-        <span className="game-props__ou-btn-label">Over</span>
+      <button
+        type="button"
+        className={`game-props__ou-btn${overSelected ? ' game-props__ou-btn--selected' : ''}`}
+        onClick={() => toggle('OVER')}
+        aria-pressed={overSelected}
+      >
+        <span className="game-props__ou-btn-label">O {lineLabel}</span>
         <span className="game-props__ou-btn-odds muted">{overAmerican}</span>
       </button>
-      <button type="button" className="game-props__ou-btn" onClick={() => add('UNDER')}>
-        <span className="game-props__ou-btn-label">Under</span>
+      <button
+        type="button"
+        className={`game-props__ou-btn${underSelected ? ' game-props__ou-btn--selected' : ''}`}
+        onClick={() => toggle('UNDER')}
+        aria-pressed={underSelected}
+      >
+        <span className="game-props__ou-btn-label">U {lineLabel}</span>
         <span className="game-props__ou-btn-odds muted">{underAmerican}</span>
       </button>
     </div>
@@ -113,8 +144,10 @@ export function GamePropBoard({ bundle }: Props) {
 
           <div className="game-props__head game-props__head--desktop" aria-hidden>
             <span className="game-props__th game-props__th--player">Player</span>
-            <span className="game-props__th game-props__th--line">Line</span>
-            <span className="game-props__th game-props__th--pick">Pick</span>
+            <span className="game-props__th game-props__th--pick">
+              <span>Over</span>
+              <span>Under</span>
+            </span>
           </div>
 
           <ul className="game-props__list">
@@ -127,14 +160,6 @@ export function GamePropBoard({ bundle }: Props) {
                   <div className="game-props__player">
                     <span className="game-props__name">{player.full_name}</span>
                     <span className="game-props__team muted">{player.team_name}</span>
-                  </div>
-
-                  <div className="game-props__line-cell">
-                    {line != null ? (
-                      <span className="game-props__line-val">{formatHalfPointLine(line)}</span>
-                    ) : (
-                      <span className="game-props__line-na muted">—</span>
-                    )}
                   </div>
 
                   <div className="game-props__pick-cell">

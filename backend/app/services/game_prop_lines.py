@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import math
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from app.db.models import Game, Player, PlayerGameStat, Team
 GAME_PROP_LOOKBACK = 10
 GAME_PROP_MIN_SAMPLES = 3
 TOP_PLAYERS_PER_TEAM = 5
+BOOK_MARGIN = 0.14
 
 
 def _half_point_line(values: list[int]) -> float | None:
@@ -23,16 +25,68 @@ def _half_point_line(values: list[int]) -> float | None:
     return float(round(avg - 0.5) + 0.5)
 
 
-def _american_odds_pair(seed: int) -> tuple[str, str]:
-    """Simulated American odds for UI only — not live sportsbook prices."""
-    s = abs(seed) % 10_007
-    over_am = -102 - (s % 19)
-    under_am = over_am - 2 - ((s // 19) % 9)
-    return (str(over_am), str(under_am))
+def _normal_cdf(x: float, mean: float, stddev: float) -> float:
+    z = (x - mean) / (stddev * math.sqrt(2.0))
+    return 0.5 * (1.0 + math.erf(z))
 
 
-def _odds_seed(player_id: int, stat: str) -> int:
-    return player_id * 131 + sum(ord(c) for c in stat) * 17
+def _american_from_probability(p: float) -> str:
+    if p <= 0.0:
+        return "+10000"
+    if p >= 1.0:
+        return "-10000"
+    if p >= 0.5:
+        odds = -100.0 * p / (1.0 - p)
+    else:
+        odds = 100.0 * (1.0 - p) / p
+    rounded = int(round(odds))
+    return f"+{rounded}" if rounded > 0 else str(rounded)
+
+
+def _apply_two_way_margin(p_over_fair: float, margin: float = BOOK_MARGIN) -> tuple[float, float]:
+    """
+    Apply house margin to a fair two-way market.
+
+    Margin system is calibrated so with `margin=0.14`, a 50/50 market prices to -114/-114.
+    """
+    # Overround multiplier; for 0.14 this is 1.06542056... => 0.53271028 each on coinflip.
+    overround = 1.0 + (margin / (2.0 + margin))
+    p_over = p_over_fair * overround
+    p_under = (1.0 - p_over_fair) * overround
+
+    # Guardrails for extreme tails.
+    max_side = 0.999
+    min_side = 0.001
+    if p_over >= max_side:
+        p_over = max_side
+        p_under = max(min_side, min(max_side, overround - p_over))
+    elif p_under >= max_side:
+        p_under = max_side
+        p_over = max(min_side, min(max_side, overround - p_under))
+    else:
+        p_over = max(min_side, p_over)
+        p_under = max(min_side, p_under)
+
+    return (p_over, p_under)
+
+
+def _american_odds_pair_from_history(values: list[int], line: float | None) -> tuple[str, str]:
+    """Compute fair O/U American odds from normal approximation of prior game stats."""
+    if line is None or len(values) < GAME_PROP_MIN_SAMPLES:
+        return ("-110", "-110")
+    mean = sum(values) / len(values)
+    if len(values) > 1:
+        variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
+        stddev = math.sqrt(max(variance, 0.0))
+    else:
+        stddev = 0.0
+    stddev = max(stddev, 1.0)
+
+    # For half-point lines there is no push; use strict over probability.
+    p_over = 1.0 - _normal_cdf(line, mean, stddev)
+    p_over = min(max(p_over, 0.02), 0.98)
+    p_over, p_under = _apply_two_way_margin(p_over)
+    return (_american_from_probability(p_over), _american_from_probability(p_under))
 
 
 def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle:
@@ -71,9 +125,12 @@ def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle
         reb_vals = [s.rebounds for s in samples]
         ast_vals = [s.assists for s in samples]
 
-        po, pu = _american_odds_pair(_odds_seed(player.id, "PTS"))
-        ro, ru = _american_odds_pair(_odds_seed(player.id, "REB"))
-        ao, au = _american_odds_pair(_odds_seed(player.id, "AST"))
+        pts_line = _half_point_line(pts_vals)
+        reb_line = _half_point_line(reb_vals)
+        ast_line = _half_point_line(ast_vals)
+        po, pu = _american_odds_pair_from_history(pts_vals, pts_line)
+        ro, ru = _american_odds_pair_from_history(reb_vals, reb_line)
+        ao, au = _american_odds_pair_from_history(ast_vals, ast_line)
 
         players_build.append(
             PlayerPropLinesRead(
@@ -83,9 +140,9 @@ def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle
                 team_name=team_name,
                 nba_player_id=player.nba_player_id,
                 sample_size=n,
-                pts_line=_half_point_line(pts_vals),
-                reb_line=_half_point_line(reb_vals),
-                ast_line=_half_point_line(ast_vals),
+                pts_line=pts_line,
+                reb_line=reb_line,
+                ast_line=ast_line,
                 pts_over_american=po,
                 pts_under_american=pu,
                 reb_over_american=ro,

@@ -1,5 +1,6 @@
 import { apiRequest } from './client'
 import type {
+  AccountRead,
   GamePropLinesBundle,
   GameRead,
   HealthResponse,
@@ -8,6 +9,9 @@ import type {
   PlayerGameStatRead,
   PlayerRead,
   TeamRead,
+  WagerDetailResponse,
+  WagerPlaceBody,
+  WagerRead,
 } from './types'
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -21,6 +25,21 @@ function query(params: Record<string, string | number | undefined>): string {
 
 export function getHealth() {
   return apiRequest<HealthResponse>('/health')
+}
+
+export function getAccount(accountId: number) {
+  return apiRequest<AccountRead>(`/accounts/${accountId}`)
+}
+
+export function placeWager(accountId: number, body: WagerPlaceBody) {
+  return apiRequest<WagerDetailResponse>(`/accounts/${accountId}/wagers`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function listWagers(accountId: number, options?: { limit?: number }) {
+  return apiRequest<WagerRead[]>(`/accounts/${accountId}/wagers${query({ limit: options?.limit })}`)
 }
 
 export function listTeams(options?: { limit?: number; offset?: number }) {
