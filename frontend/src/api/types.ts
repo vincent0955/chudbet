@@ -34,6 +34,33 @@ export interface PlayerGameStatRead {
   minutes: number
 }
 
+/** Server-aggregated rolling-average lines for PTS / REB / AST for one game. */
+export interface PlayerPropLinesRead {
+  id: number
+  full_name: string
+  team_id: number
+  team_name: string
+  nba_player_id: number
+  sample_size: number
+  pts_line: number | null
+  reb_line: number | null
+  ast_line: number | null
+  /** Placeholder American odds strings, e.g. "-110". */
+  pts_over_american: string
+  pts_under_american: string
+  reb_over_american: string
+  reb_under_american: string
+  ast_over_american: string
+  ast_under_american: string
+}
+
+export interface GamePropLinesBundle {
+  game: GameRead
+  lookback: number
+  min_samples: number
+  players: PlayerPropLinesRead[]
+}
+
 export type ParlayMode = 'standard' | 'x_of_y'
 
 export type StatType = 'PTS' | 'REB' | 'AST'

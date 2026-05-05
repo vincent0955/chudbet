@@ -44,3 +44,30 @@ class PlayerGameStatRead(BaseModel):
     rebounds: int
     assists: int
     minutes: float
+
+
+class PlayerPropLinesRead(BaseModel):
+    """Per-player projected PTS/REB/AST lines for one game (rolling avg — see bundle metadata)."""
+
+    id: int
+    full_name: str
+    team_id: int
+    team_name: str
+    nba_player_id: int
+    sample_size: int
+    pts_line: float | None = None
+    reb_line: float | None = None
+    ast_line: float | None = None
+    pts_over_american: str
+    pts_under_american: str
+    reb_over_american: str
+    reb_under_american: str
+    ast_over_american: str
+    ast_under_american: str
+
+
+class GamePropLinesBundle(BaseModel):
+    game: GameRead
+    lookback: int
+    min_samples: int
+    players: list[PlayerPropLinesRead]

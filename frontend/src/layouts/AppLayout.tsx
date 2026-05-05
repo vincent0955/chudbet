@@ -1,9 +1,15 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { BetSlip } from '../components/BetSlip'
 
+function showBetSlipPath(pathname: string): boolean {
+  if (pathname === '/' || pathname === '') return true
+  const parts = pathname.split('/').filter(Boolean)
+  return parts.length === 2 && parts[0] === 'games'
+}
+
 export function AppLayout() {
   const { pathname } = useLocation()
-  const showSlip = pathname === '/' || pathname === ''
+  const showSlip = showBetSlipPath(pathname)
 
   return (
     <div className="app-shell">
@@ -26,21 +32,23 @@ export function AppLayout() {
         </div>
       </header>
 
-      <div className={`app-body${showSlip ? ' app-body--with-slip' : ''}`}>
-        {showSlip ? (
-          <div className="app-body__cluster">
+      <div className="app-main-gutter">
+        <div className={`app-body${showSlip ? ' app-body--with-slip' : ''}`}>
+          {showSlip ? (
+            <div className="app-body__cluster">
+              <main className="app-body__main">
+                <Outlet />
+              </main>
+              <aside className="app-body__slip" aria-label="Bet slip">
+                <BetSlip />
+              </aside>
+            </div>
+          ) : (
             <main className="app-body__main">
               <Outlet />
             </main>
-            <aside className="app-body__slip" aria-label="Bet slip">
-              <BetSlip />
-            </aside>
-          </div>
-        ) : (
-          <main className="app-body__main">
-            <Outlet />
-          </main>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

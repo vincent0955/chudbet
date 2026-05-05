@@ -11,3 +11,9 @@ export function formatStat(n: number, maxFractionDigits = 1): string {
   if (Number.isInteger(n)) return String(n)
   return n.toFixed(maxFractionDigits)
 }
+
+/** Matches server: nearest line that always ends in *.5 (never *.0). */
+export function formatHalfPointLine(n: number): string {
+  const line = Math.round(n - 0.5) + 0.5
+  return line.toFixed(1)
+}

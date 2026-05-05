@@ -1,5 +1,6 @@
 import { apiRequest } from './client'
 import type {
+  GamePropLinesBundle,
   GameRead,
   HealthResponse,
   ParlayCreate,
@@ -36,6 +37,10 @@ export function listGames(options?: { limit?: number; offset?: number }) {
 
 export function getGame(gameId: number) {
   return apiRequest<GameRead>(`/games/${gameId}`)
+}
+
+export function getGamePropLines(gameId: number) {
+  return apiRequest<GamePropLinesBundle>(`/games/${gameId}/prop-lines`)
 }
 
 export function listPlayerStats(playerId: number, options?: { limit?: number; offset?: number }) {

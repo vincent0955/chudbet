@@ -64,7 +64,7 @@ export function BetSlip() {
           <div className="bet-slip__empty">
             <p className="bet-slip__empty-title">Your slip is empty</p>
             <p className="bet-slip__empty-text">
-              Add props from the Players tab (stats help sanity-check the line). Choose standard,{' '}
+              Add props from a game page (points / rebounds / assists) or the Players browse tab. Choose standard,{' '}
               <strong>X of Y</strong>, or <strong>anti-parlay</strong> modes when you submit the ticket in the next
               phase.
             </p>

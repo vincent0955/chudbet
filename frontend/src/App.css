@@ -2,6 +2,24 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
+}
+
+/*
+  Dedicated inset layer (survives nested flex/grid quirks). Keeps page chrome aligned with
+  `.app-header` horizontal padding.
+*/
+.app-main-gutter {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding-left: max(var(--space-6), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--space-6), env(safe-area-inset-right, 0px));
 }
 
 .app-header {
@@ -70,6 +88,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .app-body--with-slip {
@@ -79,19 +101,32 @@
   min-height: 0;
 }
 
+/*
+  Column flex defaults to `align-items: stretch`, which forces children to full width and ignores
+  `width` + `margin: auto`. `align-self: center` lets the capped width + centering actually apply.
+*/
 .app-body__cluster {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  width: 100%;
+  box-sizing: border-box;
+  align-self: center;
+  width: min(100%, calc(56rem + var(--space-6) + 380px));
 }
 
 .app-body__main {
   min-width: 0;
-  padding: var(--space-6);
-  padding-bottom: var(--space-6);
+  width: 100%;
+  padding-block: var(--space-6);
+  padding-inline: 0;
+}
+
+/* Slip routes: vertical rhythm only — horizontal inset comes from `.app-body` (matches header). */
+.app-body__cluster .app-body__main {
+  padding-block: var(--space-6);
+  padding-inline: 0;
 }
 
 .app-body--with-slip .app-body__main {
@@ -107,23 +142,8 @@
     display: grid;
     grid-template-columns: minmax(0, 56rem) minmax(280px, 380px);
     gap: var(--space-6);
-    box-sizing: border-box;
-    width: 100%;
-    max-width: calc(56rem + var(--space-6) + 380px);
-    margin-inline: auto;
-    padding-inline: var(--space-6);
     align-items: start;
-  }
-
-  .app-body__cluster .app-body__main {
-    padding-top: var(--space-6);
-    padding-bottom: var(--space-6);
-    padding-left: 0;
-    padding-right: 0;
-  }
-
-  .app-body__cluster .page--browse {
-    margin-inline: 0;
+    flex: 1;
   }
 
   .app-body__cluster .app-body__slip {
@@ -146,7 +166,7 @@
 }
 
 @media (max-width: 899px) {
-  .app-body--with-slip .app-body__main {
+  .app-body__cluster .app-body__main {
     /* Reserve space for fixed slip so content isn’t hidden behind it */
     padding-bottom: calc(9.5rem + env(safe-area-inset-bottom, 0px));
   }
@@ -1137,11 +1157,7 @@
   letter-spacing: 0.04em;
 }
 
-/* Game detail */
-.page--game-detail {
-  max-width: 42rem;
-}
-
+/* Game detail (width follows .page--browse when both classes apply) */
 .game-detail__crumb {
   margin: 0 0 var(--space-4);
 }
@@ -1177,18 +1193,196 @@
   font-size: 0.8125rem;
 }
 
-.game-detail__props-placeholder {
-  margin: 0;
+/* Game props (game detail) */
+.game-props {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
 }
 
-.game-detail__props-title {
-  margin: 0 0 var(--space-3);
+.game-props__explainer {
+  margin: 0;
+  padding-inline: var(--space-2);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+/*
+  Padding comes from `.card`. Extra horizontal inset keeps rows / headers off the card edges.
+  `--game-props-inline` matches title, column headers, and list columns.
+*/
+.game-props__section {
+  --game-props-inline: var(--space-4);
+}
+
+.game-props__section-title {
+  margin: 0 0 var(--space-4);
+  padding-inline: var(--game-props-inline);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.game-props__head--desktop {
+  display: none;
+}
+
+.game-props__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--game-props-inline);
+}
+
+.game-props__row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid rgba(42, 51, 68, 0.85);
+}
+
+.game-props__row:last-child {
+  border-bottom: none;
+}
+
+.game-props__player {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.game-props__name {
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: -0.02em;
+}
+
+.game-props__team {
+  font-size: 0.75rem;
+}
+
+.game-props__line-cell {
+  display: flex;
+  align-items: center;
+}
+
+.game-props__line-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
   font-size: 1rem;
+  color: var(--color-accent);
+}
+
+.game-props__line-na {
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
-.game-detail__props-placeholder .muted {
-  margin: 0;
-  font-size: 0.9375rem;
-  line-height: 1.55;
+.game-props__pick-cell {
+  min-width: 0;
+}
+
+.game-props__pick-na {
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.game-props__ou {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.game-props__ou-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 46px;
+  padding: var(--space-2) var(--space-2);
+  border-radius: 8px;
+  border: 1px solid rgba(61, 214, 140, 0.35);
+  background: rgba(61, 214, 140, 0.08);
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.game-props__ou-btn-label {
+  font-weight: 700;
+  font-size: 0.75rem;
+  line-height: 1.15;
+}
+
+.game-props__ou-btn-odds {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.5625rem;
+  line-height: 1.15;
+}
+
+.game-props__ou-btn:hover {
+  border-color: var(--color-accent-muted);
+  background: rgba(61, 214, 140, 0.14);
+}
+
+.game-props__ou-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (min-width: 700px) {
+  .game-props__head--desktop {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 4rem minmax(9.25rem, 11rem);
+    gap: var(--space-3);
+    padding-inline: var(--game-props-inline);
+    padding-bottom: var(--space-2);
+    margin-bottom: var(--space-1);
+    border-bottom: 1px solid rgba(42, 51, 68, 0.85);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-muted);
+  }
+
+  .game-props__row {
+    grid-template-columns: minmax(0, 1fr) 4rem minmax(9.25rem, 11rem);
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) 0;
+  }
+
+  .game-props__line-cell {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 699px) {
+  .game-props__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .game-props__player {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .game-props__line-cell {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-top: 2px;
+  }
+
+  .game-props__pick-cell {
+    flex: 1 1 100%;
+    width: 100%;
+  }
 }
