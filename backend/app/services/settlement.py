@@ -8,8 +8,8 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.enums import LegDirection, ParlayMode, StatType, WagerStatus
-from app.db.models import Game, Parlay, ParlayLeg, PlayerGameStat, Wager
+from app.db.enums import GameMarketType, GameSelection, LegDirection, ParlayMode, StatType, WagerStatus
+from app.db.models import Game, Parlay, ParlayGameLeg, ParlayLeg, PlayerGameStat, Wager
 from app.services import money
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,52 @@ def _evaluate_leg(session: Session, leg: ParlayLeg) -> Literal["win", "loss", "v
     return "win" if _leg_stat_hit(val, float(leg.line), leg.direction) else "loss"
 
 
+def game_leg_ui_outcome(session: Session, leg: ParlayGameLeg) -> LegUiOutcome:
+    r = _evaluate_game_leg(session, leg)
+    return {"pending": "pending", "void": "void", "win": "hit", "loss": "miss"}[r]
+
+
+def _evaluate_game_leg(session: Session, leg: ParlayGameLeg) -> Literal["win", "loss", "void", "pending"]:
+    game = session.get(Game, leg.game_id)
+    if game is None:
+        return "void"
+    if not _is_final_status(game.status):
+        return "pending"
+    if game.home_score is None or game.away_score is None:
+        return "void"
+
+    home = float(game.home_score)
+    away = float(game.away_score)
+    if leg.market_type == GameMarketType.MONEYLINE:
+        if home == away:
+            return "void"
+        if leg.selection == GameSelection.HOME:
+            return "win" if home > away else "loss"
+        if leg.selection == GameSelection.AWAY:
+            return "win" if away > home else "loss"
+        return "void"
+
+    if leg.line is None:
+        return "void"
+
+    if leg.market_type == GameMarketType.SPREAD:
+        margin = home - away
+        adjusted = margin + float(leg.line) if leg.selection == GameSelection.HOME else (-margin) + float(leg.line)
+        if adjusted == 0:
+            return "void"
+        return "win" if adjusted > 0 else "loss"
+
+    total = home + away
+    diff = total - float(leg.line)
+    if diff == 0:
+        return "void"
+    if leg.selection == GameSelection.OVER:
+        return "win" if diff > 0 else "loss"
+    if leg.selection == GameSelection.UNDER:
+        return "win" if diff < 0 else "loss"
+    return "void"
+
+
 def _resolve_ticket(parlay: Parlay, leg_results: list[str]) -> Outcome:
     if not leg_results:
         return "void"
@@ -119,7 +165,10 @@ def settle_open_wagers(session: Session) -> dict[str, int]:
     wagers = session.scalars(
         select(Wager)
         .where(Wager.status == WagerStatus.OPEN)
-        .options(selectinload(Wager.parlay).selectinload(Parlay.legs)),
+        .options(
+            selectinload(Wager.parlay).selectinload(Parlay.legs),
+            selectinload(Wager.parlay).selectinload(Parlay.game_legs),
+        ),
     ).all()
 
     for wager in wagers:
@@ -131,8 +180,11 @@ def settle_open_wagers(session: Session) -> dict[str, int]:
             continue
 
         legs = sorted(parlay.legs, key=lambda x: x.sort_order)
+        game_legs = sorted(parlay.game_legs, key=lambda x: x.sort_order)
         try:
-            leg_results = [_evaluate_leg(session, lg) for lg in legs]
+            leg_results = [_evaluate_leg(session, lg) for lg in legs] + [
+                _evaluate_game_leg(session, gl) for gl in game_legs
+            ]
             outcome = _resolve_ticket(parlay, leg_results)
             if outcome == "pending":
                 counts["pending"] += 1

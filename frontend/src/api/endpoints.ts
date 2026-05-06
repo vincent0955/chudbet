@@ -1,6 +1,7 @@
 import { apiRequest } from './client'
 import type {
   AccountRead,
+  GameMarketsRead,
   GamePropLinesBundle,
   GameRead,
   HealthResponse,
@@ -60,6 +61,10 @@ export function getGame(gameId: number) {
 
 export function getGamePropLines(gameId: number) {
   return apiRequest<GamePropLinesBundle>(`/games/${gameId}/prop-lines`)
+}
+
+export function getGameMarkets(gameId: number) {
+  return apiRequest<GameMarketsRead>(`/games/${gameId}/markets`)
 }
 
 export function listPlayerStats(playerId: number, options?: { limit?: number; offset?: number }) {

@@ -12,6 +12,7 @@ from app.db.base import Base
 from app.db import models  # noqa: F401 — register models for create_all
 from app.db.migrate import ensure_postgres_schema
 from app.db.session import get_engine
+from app.ingestion.backfill_scores import backfill_missing_final_game_scores
 from app.ingestion.nba_sync import run_full_ingest
 
 
@@ -71,6 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--backfill-missing-scores",
+        action="store_true",
+        help="Backfill home/away scores for FINAL games missing them (no player stat ingest).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -96,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
     regular_only = not args.playoffs
 
     with Session(engine) as session:
+        if args.backfill_missing_scores:
+            backfill_missing_final_game_scores(session)
+            return 0
+
         run_full_ingest(
             session,
             season=args.season,

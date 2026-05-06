@@ -149,6 +149,22 @@ def _parse_game_time_utc(raw: object) -> datetime | None:
         return None
 
 
+def _parse_score(raw: object) -> int | None:
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, str):
+            s = raw.strip()
+            if not s:
+                return None
+            return int(float(s))
+        if pd.isna(raw):
+            return None
+        return int(raw)
+    except Exception:
+        return None
+
+
 def sync_games_from_finder(
     session: Session,
     season: str,
@@ -207,6 +223,8 @@ def sync_games_from_finder(
                 home_team_id=home.id,
                 away_team_id=away.id,
                 game_date=game_date,
+                home_score=None,
+                away_score=None,
                 status="scheduled",
             )
             session.add(existing)
@@ -277,6 +295,8 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
 
             home_nba_id = int(sub.iloc[0]["teamId"])
             away_nba_id = int(sub.iloc[1]["teamId"])
+            home_score = _parse_score(sub.iloc[0].get("score"))
+            away_score = _parse_score(sub.iloc[1].get("score"))
 
             home = teams_by_nba.get(home_nba_id)
             away = teams_by_nba.get(away_nba_id)
@@ -298,6 +318,8 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
                     away_team_id=away.id,
                     game_date=slate,
                     game_time_utc=tip_utc,
+                    home_score=home_score,
+                    away_score=away_score,
                     status=status_txt,
                 )
                 session.add(existing)
@@ -307,6 +329,8 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
                 existing.status = status_txt[:64]
                 if tip_utc is not None:
                     existing.game_time_utc = tip_utc
+                existing.home_score = home_score
+                existing.away_score = away_score
 
             touched.append(existing)
 
@@ -345,6 +369,25 @@ def _box_score_rows_v3(game_id: str) -> pd.DataFrame | None:
         return None
 
 
+def _box_score_team_points_v3(game_id: str) -> dict[int, int] | None:
+    _pause()
+    try:
+        b = boxscoretraditionalv3.BoxScoreTraditionalV3(game_id=game_id)
+        df = b.team_stats.get_data_frame()
+        if df is None or df.empty:
+            return None
+        out: dict[int, int] = {}
+        for _, r in df.iterrows():
+            tid = int(r.get("teamId"))
+            pts = normalize_stat_int(r.get("points"))
+            if tid > 0:
+                out[tid] = pts
+        return out if out else None
+    except Exception as exc:
+        logger.debug("BoxScoreTraditionalV3 team_stats failed for %s: %s", game_id, exc)
+        return None
+
+
 def _box_score_rows_v2(game_id: str) -> pd.DataFrame | None:
     _pause()
     try:
@@ -355,6 +398,25 @@ def _box_score_rows_v2(game_id: str) -> pd.DataFrame | None:
         return df
     except Exception as exc:
         logger.debug("BoxScoreTraditionalV2 failed for %s: %s", game_id, exc)
+        return None
+
+
+def _box_score_team_points_v2(game_id: str) -> dict[int, int] | None:
+    _pause()
+    try:
+        b = boxscoretraditionalv2.BoxScoreTraditionalV2(game_id=game_id)
+        df = b.team_stats.get_data_frame()
+        if df is None or df.empty:
+            return None
+        out: dict[int, int] = {}
+        for _, r in df.iterrows():
+            tid = int(r.get("TEAM_ID"))
+            pts = normalize_stat_int(r.get("PTS"))
+            if tid > 0:
+                out[tid] = pts
+        return out if out else None
+    except Exception as exc:
+        logger.debug("BoxScoreTraditionalV2 team_stats failed for %s: %s", game_id, exc)
         return None
 
 
@@ -404,6 +466,19 @@ def ingest_box_score_for_game(session: Session, game: Game) -> int:
     status = _summary_status(gid)
     if status:
         game.status = status[:64]
+
+    # Also backfill final team scores for historical games.
+    pts_by_team = _box_score_team_points_v3(gid)
+    if pts_by_team is None:
+        pts_by_team = _box_score_team_points_v2(gid)
+    if pts_by_team:
+        # team_stats returns NBA team IDs, while Game stores local Team PKs.
+        home_team = session.get(Team, game.home_team_id)
+        away_team = session.get(Team, game.away_team_id)
+        if home_team is not None:
+            game.home_score = pts_by_team.get(home_team.nba_team_id)
+        if away_team is not None:
+            game.away_score = pts_by_team.get(away_team.nba_team_id)
 
     df = _box_score_rows_v3(gid)
     if df is None:

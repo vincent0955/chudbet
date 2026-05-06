@@ -4,6 +4,7 @@ from app.db.models.account import Account
 from app.db.models.game import Game
 from app.db.models.ledger_entry import LedgerEntry
 from app.db.models.parlay import Parlay
+from app.db.models.parlay_game_leg import ParlayGameLeg
 from app.db.models.parlay_leg import ParlayLeg
 from app.db.models.player import Player
 from app.db.models.player_game_stats import PlayerGameStat
@@ -15,6 +16,7 @@ __all__ = [
     "Game",
     "LedgerEntry",
     "Parlay",
+    "ParlayGameLeg",
     "ParlayLeg",
     "Player",
     "PlayerGameStat",

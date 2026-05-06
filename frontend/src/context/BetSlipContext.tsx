@@ -1,9 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
-import type { LegIn } from '../api/types'
+import type { GameLegIn, LegIn } from '../api/types'
+
+export type SlipLegIn = { kind: 'player'; leg: LegIn } | { kind: 'game'; leg: GameLegIn }
 
 export type SlipLegRow = {
   id: string
-  leg: LegIn
+  leg: SlipLegIn
   /** Player name (first line on the slip). */
   playerLine: string
   /** Stat / side / line without odds (second line, muted). */
@@ -19,12 +21,12 @@ export type SlipLegRow = {
 type BetSlipContextValue = {
   legs: SlipLegRow[]
   addLeg: (
-    leg: LegIn,
+    leg: SlipLegIn,
     display: { playerLine: string; propLine: string; secondary?: string; gameSlipHeader?: string | null },
     americanOdds?: number | null,
   ) => boolean
-  hasLeg: (leg: LegIn) => boolean
-  removeLegByLeg: (leg: LegIn) => void
+  hasLeg: (leg: SlipLegIn) => boolean
+  removeLegByLeg: (leg: SlipLegIn) => void
   removeLeg: (id: string) => void
   clearLegs: () => void
 }
@@ -39,30 +41,39 @@ function newRowId(): string {
 export function BetSlipProvider({ children }: { children: ReactNode }) {
   const [legs, setLegs] = useState<SlipLegRow[]>([])
 
-  const sameLine = useCallback((a: number, b: number) => Math.abs(a - b) < 1e-9, [])
+  const sameLine = useCallback((a: number | null | undefined, b: number | null | undefined) => {
+    if (a == null || b == null) return a == null && b == null
+    return Math.abs(a - b) < 1e-9
+  }, [])
 
-  const samePropKey = useCallback(
-    (a: LegIn, b: LegIn): boolean => {
-      return (
-        a.player_id === b.player_id &&
-        a.game_id === b.game_id &&
-        a.stat_type === b.stat_type &&
-        sameLine(a.line, b.line)
-      )
+  const sameLeg = useCallback(
+    (a: SlipLegIn, b: SlipLegIn): boolean => {
+      if (a.kind !== b.kind) return false
+      if (a.kind === 'player' && b.kind === 'player') {
+        return (
+          a.leg.player_id === b.leg.player_id &&
+          a.leg.game_id === b.leg.game_id &&
+          a.leg.stat_type === b.leg.stat_type &&
+          sameLine(a.leg.line, b.leg.line) &&
+          a.leg.direction === b.leg.direction
+        )
+      }
+      if (a.kind === 'game' && b.kind === 'game') {
+        return (
+          a.leg.game_id === b.leg.game_id &&
+          a.leg.market_type === b.leg.market_type &&
+          a.leg.selection === b.leg.selection &&
+          sameLine(a.leg.line, b.leg.line)
+        )
+      }
+      return false
     },
     [sameLine],
   )
 
-  const sameLeg = useCallback(
-    (a: LegIn, b: LegIn): boolean => {
-      return samePropKey(a, b) && a.direction === b.direction
-    },
-    [samePropKey],
-  )
-
   const addLeg = useCallback(
     (
-      leg: LegIn,
+      leg: SlipLegIn,
       display: {
         playerLine: string
         propLine: string
@@ -75,7 +86,20 @@ export function BetSlipProvider({ children }: { children: ReactNode }) {
       let added = false
       setLegs((prev) => {
         if (prev.some((r) => sameLeg(r.leg, leg))) return prev
-        if (prev.some((r) => samePropKey(r.leg, leg) && r.leg.direction !== leg.direction)) return prev
+        if (
+          leg.kind === 'player' &&
+          prev.some(
+            (r) =>
+              r.leg.kind === 'player' &&
+              r.leg.leg.player_id === leg.leg.player_id &&
+              r.leg.leg.game_id === leg.leg.game_id &&
+              r.leg.leg.stat_type === leg.leg.stat_type &&
+              sameLine(r.leg.leg.line, leg.leg.line) &&
+              r.leg.leg.direction !== leg.leg.direction,
+          )
+        ) {
+          return prev
+        }
         added = true
         return [
           ...prev,
@@ -92,12 +116,12 @@ export function BetSlipProvider({ children }: { children: ReactNode }) {
       })
       return added
     },
-    [sameLeg, samePropKey],
+    [sameLeg, sameLine],
   )
 
-  const hasLeg = useCallback((leg: LegIn) => legs.some((r) => sameLeg(r.leg, leg)), [legs, sameLeg])
+  const hasLeg = useCallback((leg: SlipLegIn) => legs.some((r) => sameLeg(r.leg, leg)), [legs, sameLeg])
 
-  const removeLegByLeg = useCallback((leg: LegIn) => {
+  const removeLegByLeg = useCallback((leg: SlipLegIn) => {
     setLegs((prev) => prev.filter((r) => !sameLeg(r.leg, leg)))
   }, [sameLeg])
 

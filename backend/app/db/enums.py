@@ -19,6 +19,19 @@ class LegDirection(StrEnum):
     UNDER = "UNDER"
 
 
+class GameMarketType(StrEnum):
+    MONEYLINE = "moneyline"
+    SPREAD = "spread"
+    TOTAL = "total"
+
+
+class GameSelection(StrEnum):
+    HOME = "home"
+    AWAY = "away"
+    OVER = "over"
+    UNDER = "under"
+
+
 class LedgerEntryType(StrEnum):
     DEPOSIT = "deposit"
     WAGER_STAKE = "wager_stake"

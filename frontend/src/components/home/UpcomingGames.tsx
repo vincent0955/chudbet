@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { ApiError, getHealth, listGames, listTeams } from '../../api'
-import type { GameRead, TeamRead } from '../../api/types'
+import { ApiError, getGameMarkets, getHealth, listGames, listTeams } from '../../api'
+import type { GameLegIn, GameMarketsRead, GameRead, TeamRead } from '../../api/types'
+import { useBetSlip } from '../../context/BetSlipContext'
+import { parseAmericanOddsString } from '../../utils/parlayOdds'
 import { formatGameDate } from '../browse/format'
 
 type LoadState =
@@ -102,19 +104,118 @@ function StackedOddsPill({ top, bottom }: { top: string; bottom: string }) {
   )
 }
 
-function GameOddsRow({ teamLabel, markets }: { teamLabel: string; markets: MarketTriple }) {
+function GameOddsRow({
+  game,
+  teamLabel,
+  gameHeader,
+  markets,
+  side,
+}: {
+  game: GameRead
+  teamLabel: string
+  gameHeader: string
+  markets: MarketTriple
+  side: 'away' | 'home'
+}) {
+  const { addLeg, hasLeg, removeLegByLeg } = useBetSlip()
+  const spreadLine = Number.parseFloat(markets.spread.line)
+  const spreadOdds = parseAmericanOddsString(markets.spread.odds)
+  const moneylineOdds = parseAmericanOddsString(markets.ml)
+  const totalValue = Number.parseFloat(markets.total.sidePoints.replace(/[^\d.]/g, ''))
+  const totalOdds = parseAmericanOddsString(markets.total.odds)
+  const totalOver = markets.total.sidePoints.trim().toUpperCase().startsWith('O')
+
+  const spreadLeg: GameLegIn | null =
+    Number.isFinite(spreadLine) && spreadOdds != null
+      ? {
+          game_id: game.id,
+          market_type: 'spread',
+          selection: side === 'home' ? 'home' : 'away',
+          line: spreadLine,
+          odds_american: spreadOdds,
+        }
+      : null
+  const mlLeg: GameLegIn | null =
+    moneylineOdds != null
+      ? {
+          game_id: game.id,
+          market_type: 'moneyline',
+          selection: side === 'home' ? 'home' : 'away',
+          line: null,
+          odds_american: moneylineOdds,
+        }
+      : null
+  const totalLeg: GameLegIn | null =
+    Number.isFinite(totalValue) && totalOdds != null
+      ? {
+          game_id: game.id,
+          market_type: 'total',
+          selection: totalOver ? 'over' : 'under',
+          line: totalValue,
+          odds_american: totalOdds,
+        }
+      : null
+
+  const toggle = (leg: GameLegIn | null, label: string) => {
+    if (!leg) return
+    const wrapped = { kind: 'game' as const, leg }
+    if (hasLeg(wrapped)) {
+      removeLegByLeg(wrapped)
+      return
+    }
+    addLeg(
+      wrapped,
+      {
+        playerLine: teamLabel,
+        propLine: label,
+        gameSlipHeader: gameHeader,
+      },
+      leg.odds_american,
+    )
+  }
+
+  const onPillClick =
+    (leg: GameLegIn | null, label: string) => (e: MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      toggle(leg, label)
+    }
+
+  const spreadSelected = spreadLeg ? hasLeg({ kind: 'game', leg: spreadLeg }) : false
+  const mlSelected = mlLeg ? hasLeg({ kind: 'game', leg: mlLeg }) : false
+  const totalSelected = totalLeg ? hasLeg({ kind: 'game', leg: totalLeg }) : false
+
   return (
     <div className="upcoming-game-bar__line">
       <span className="upcoming-game-bar__team">{teamLabel}</span>
-      <StackedOddsPill top={markets.spread.line} bottom={markets.spread.odds} />
-      <span className="upcoming-game-bar__pill upcoming-game-bar__pill--plain">{markets.ml}</span>
-      <StackedOddsPill top={markets.total.sidePoints} bottom={markets.total.odds} />
+      <button
+        type="button"
+        className={`upcoming-game-bar__pill-btn${spreadSelected ? ' upcoming-game-bar__pill-btn--selected' : ''}`}
+        onClick={onPillClick(spreadLeg, `Spread ${markets.spread.line}`)}
+      >
+        <StackedOddsPill top={markets.spread.line} bottom={markets.spread.odds} />
+      </button>
+      <button
+        type="button"
+        className={`upcoming-game-bar__pill-btn${mlSelected ? ' upcoming-game-bar__pill-btn--selected' : ''}`}
+        onClick={onPillClick(mlLeg, 'Moneyline')}
+      >
+        <span className="upcoming-game-bar__pill upcoming-game-bar__pill--plain">{markets.ml}</span>
+      </button>
+      <button
+        type="button"
+        className={`upcoming-game-bar__pill-btn${totalSelected ? ' upcoming-game-bar__pill-btn--selected' : ''}`}
+        onClick={onPillClick(totalLeg, `Total ${markets.total.sidePoints}`)}
+      >
+        <StackedOddsPill top={markets.total.sidePoints} bottom={markets.total.odds} />
+      </button>
     </div>
   )
 }
 
 export function UpcomingGames() {
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
+  const [marketsByGameId, setMarketsByGameId] = useState<Record<number, { away: MarketTriple; home: MarketTriple }>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -156,6 +257,46 @@ export function UpcomingGames() {
     return filtered
   }, [state])
 
+  useEffect(() => {
+    if (state.kind !== 'ok') return
+    const target = [...upcoming].slice(0, 60)
+    let cancelled = false
+    ;(async () => {
+      const pairs = await Promise.all(
+        target.map(async (g) => {
+          try {
+            const m: GameMarketsRead = await getGameMarkets(g.id)
+            const mapped = {
+              away: {
+                spread: { line: `${m.spread.away_line >= 0 ? '+' : ''}${m.spread.away_line.toFixed(1)}`, odds: m.spread.away_american },
+                ml: m.moneyline.away_american,
+                total: { sidePoints: `O ${m.total.line.toFixed(1)}`, odds: m.total.over_american },
+              },
+              home: {
+                spread: { line: `${m.spread.home_line >= 0 ? '+' : ''}${m.spread.home_line.toFixed(1)}`, odds: m.spread.home_american },
+                ml: m.moneyline.home_american,
+                total: { sidePoints: `U ${m.total.line.toFixed(1)}`, odds: m.total.under_american },
+              },
+            }
+            return [g.id, mapped] as const
+          } catch {
+            return null
+          }
+        }),
+      )
+      if (cancelled) return
+      const next: Record<number, { away: MarketTriple; home: MarketTriple }> = {}
+      for (const p of pairs) {
+        if (!p) continue
+        next[p[0]] = p[1]
+      }
+      setMarketsByGameId(next)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [state, upcoming])
+
   if (state.kind === 'loading') {
     return (
       <section className="upcoming-games card" aria-busy="true">
@@ -178,7 +319,7 @@ export function UpcomingGames() {
     <section className="upcoming-games card">
       <h2 className="upcoming-games__title">Upcoming games</h2>
       <p className="upcoming-games__subtitle muted">
-        Spread, moneyline, and total are placeholders. Open a game to build props (coming next).
+        Spread, moneyline, and total are rough model estimates from recent scored games.
       </p>
 
       {upcoming.length === 0 ? (
@@ -198,7 +339,7 @@ export function UpcomingGames() {
             {upcoming.map((g, i) => {
               const away = teamName(teamsMap, g.away_team_id)
               const home = teamName(teamsMap, g.home_team_id)
-              const mkts = placeholderMarkets(i)
+              const mkts = marketsByGameId[g.id] ?? placeholderMarkets(i)
               return (
                 <li key={g.id}>
                   <Link className="upcoming-game-bar" to={`/games/${g.id}`}>
@@ -211,8 +352,20 @@ export function UpcomingGames() {
                           <span className="upcoming-game-bar__status">{g.status}</span>
                         </div>
                       </div>
-                      <GameOddsRow teamLabel={away} markets={mkts.away} />
-                      <GameOddsRow teamLabel={home} markets={mkts.home} />
+                      <GameOddsRow
+                        game={g}
+                        teamLabel={away}
+                        gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${g.status}`}
+                        markets={mkts.away}
+                        side="away"
+                      />
+                      <GameOddsRow
+                        game={g}
+                        teamLabel={home}
+                        gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${g.status}`}
+                        markets={mkts.home}
+                        side="home"
+                      />
                     </div>
                   </Link>
                 </li>

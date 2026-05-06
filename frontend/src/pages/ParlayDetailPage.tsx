@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, getParlay } from '../api'
-import type { ParlayLegOutcome, ParlayLegRead, ParlayRead } from '../api/types'
+import type { ParlayGameLegRead, ParlayLegOutcome, ParlayLegRead, ParlayRead } from '../api/types'
 import { formatHalfPointLine } from '../components/browse/format'
 
 function legOutcomeLabel(o: ParlayLegOutcome | null | undefined): string {
@@ -94,6 +94,18 @@ function formatLegSummary(leg: ParlayLegRead): string {
   const name = leg.player_full_name?.trim() || `Player #${leg.player_id}`
   const line = formatHalfPointLine(leg.line)
   return `${name} · ${leg.stat_type} ${leg.direction} ${line}`
+}
+
+function formatGameLegSummary(leg: ParlayGameLegRead): string {
+  if (leg.market_type === 'moneyline') {
+    return `${leg.selection.toUpperCase()} moneyline (${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american})`
+  }
+  if (leg.market_type === 'spread') {
+    const line = leg.line ?? 0
+    return `${leg.selection.toUpperCase()} spread ${line >= 0 ? '+' : ''}${line.toFixed(1)} (${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american})`
+  }
+  const line = leg.line ?? 0
+  return `${leg.selection.toUpperCase()} total ${line.toFixed(1)} (${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american})`
 }
 
 function parseId(raw: string | undefined): number | null {
@@ -220,6 +232,22 @@ function ParlayDetailLoaded({ id }: { id: number }) {
               </li>
             ))}
         </ul>
+
+        {(p.game_legs?.length ?? 0) > 0 && (
+          <>
+            <h2 className="parlay-detail__legs-heading">Game legs</h2>
+            <ul className="parlay-leg-list">
+              {[...(p.game_legs ?? [])]
+                .sort((a, b) => a.sort_order - b.sort_order)
+                .map((leg) => (
+                  <li key={leg.id} className="parlay-leg-row">
+                    <LegOutcomeIcon outcome={leg.outcome} />
+                    <span className="parlay-leg-row__text">{formatGameLegSummary(leg)}</span>
+                  </li>
+                ))}
+            </ul>
+          </>
+        )}
       </section>
     </div>
   )

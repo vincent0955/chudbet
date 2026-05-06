@@ -11,6 +11,7 @@ from app.db.base import Base
 from app.db.enums import ParlayMode
 
 if TYPE_CHECKING:
+    from app.db.models.parlay_game_leg import ParlayGameLeg
     from app.db.models.parlay_leg import ParlayLeg
     from app.db.models.wager import Wager
 
@@ -65,6 +66,12 @@ class Parlay(Base):
         back_populates="parlay",
         cascade="all, delete-orphan",
         order_by="ParlayLeg.sort_order",
+    )
+    game_legs: Mapped[list["ParlayGameLeg"]] = relationship(
+        "ParlayGameLeg",
+        back_populates="parlay",
+        cascade="all, delete-orphan",
+        order_by="ParlayGameLeg.sort_order",
     )
     wager: Mapped["Wager | None"] = relationship(
         "Wager",

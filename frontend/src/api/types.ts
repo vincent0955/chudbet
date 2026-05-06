@@ -21,6 +21,8 @@ export interface GameRead {
   game_date: ISODateString
   /** Tip-off from NBA scoreboard (UTC ISO), when known. */
   game_time_utc?: string | null
+  home_score?: number | null
+  away_score?: number | null
   status: string
   nba_game_id: string
 }
@@ -66,11 +68,35 @@ export interface GamePropLinesBundle {
   players: PlayerPropLinesRead[]
 }
 
+export interface GameMarketsRead {
+  game: GameRead
+  lookback: number
+  sample_games_home: number
+  sample_games_away: number
+  moneyline: {
+    home_american: string
+    away_american: string
+  }
+  spread: {
+    home_line: number
+    home_american: string
+    away_line: number
+    away_american: string
+  }
+  total: {
+    line: number
+    over_american: string
+    under_american: string
+  }
+}
+
 export type ParlayMode = 'standard' | 'x_of_y'
 
 export type StatType = 'PTS' | 'REB' | 'AST'
 
 export type LegDirection = 'OVER' | 'UNDER'
+export type GameMarketType = 'moneyline' | 'spread' | 'total'
+export type GameSelection = 'home' | 'away' | 'over' | 'under'
 
 export type ParlayLegOutcome = 'pending' | 'hit' | 'miss' | 'void'
 
@@ -82,6 +108,14 @@ export interface LegIn {
   direction: LegDirection
 }
 
+export interface GameLegIn {
+  game_id: number
+  market_type: GameMarketType
+  selection: GameSelection
+  line?: number | null
+  odds_american: number
+}
+
 export interface ParlayCreate {
   mode: ParlayMode
   k_required?: number | null
@@ -90,6 +124,7 @@ export interface ParlayCreate {
   simulation_iterations?: number
   rng_seed?: number | null
   legs: LegIn[]
+  game_legs?: GameLegIn[]
 }
 
 export interface ParlayLegRead {
@@ -116,8 +151,21 @@ export interface ParlayRead {
   fair_decimal_odds: number | null
   metadata_json: Record<string, unknown> | null
   legs: ParlayLegRead[]
+  game_legs?: ParlayGameLegRead[]
   p_miss?: number | null
   p_ticket?: number | null
+}
+
+export interface ParlayGameLegRead {
+  id: number
+  game_id: number
+  market_type: GameMarketType
+  selection: GameSelection
+  line: number | null
+  odds_american: number
+  leg_probability: number
+  sort_order: number
+  outcome?: ParlayLegOutcome | null
 }
 
 export interface HealthResponse {

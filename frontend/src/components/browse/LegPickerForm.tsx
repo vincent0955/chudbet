@@ -92,11 +92,11 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
       ...leg,
       direction: direction === 'OVER' ? 'UNDER' : 'OVER',
     }
-    if (hasLeg(leg)) {
+    if (hasLeg({ kind: 'player', leg })) {
       setSubmitErr('This exact leg is already on your slip.')
       return
     }
-    if (hasLeg(oppositeLeg)) {
+    if (hasLeg({ kind: 'player', leg: oppositeLeg })) {
       setSubmitErr('The opposite side of this prop is already on your slip.')
       return
     }
@@ -132,7 +132,7 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
     const secondary = statHint || undefined
 
     addLeg(
-      leg,
+      { kind: 'player', leg },
       {
         playerLine: playerName,
         propLine: `${statType} ${directionLabel(direction)} ${parsed}`,

@@ -23,6 +23,9 @@ erDiagram
         integer home_team_id FK "NOT NULL"
         integer away_team_id FK "NOT NULL"
         date game_date "NOT NULL"
+        timestamptz game_time_utc "NULL"
+        integer home_score "NULL"
+        integer away_score "NULL"
         varchar status "NOT NULL, len 64"
     }
 

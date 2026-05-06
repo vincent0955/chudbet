@@ -64,22 +64,22 @@ function PropPickButtons({
     line,
     direction: 'UNDER' as const,
   }
-  const overSelected = hasLeg(overLeg)
-  const underSelected = hasLeg(underLeg)
+  const overSelected = hasLeg({ kind: 'player', leg: overLeg })
+  const underSelected = hasLeg({ kind: 'player', leg: underLeg })
 
   const toggle = (direction: 'OVER' | 'UNDER') => {
     const leg = direction === 'OVER' ? overLeg : underLeg
     const opposite = direction === 'OVER' ? underLeg : overLeg
-    if (hasLeg(leg)) {
-      removeLegByLeg(leg)
+    if (hasLeg({ kind: 'player', leg })) {
+      removeLegByLeg({ kind: 'player', leg })
       return
     }
-    if (hasLeg(opposite)) {
-      removeLegByLeg(opposite)
+    if (hasLeg({ kind: 'player', leg: opposite })) {
+      removeLegByLeg({ kind: 'player', leg: opposite })
     }
     const odds = direction === 'OVER' ? overAmerican : underAmerican
     addLeg(
-      leg,
+      { kind: 'player', leg },
       {
         playerLine: player.full_name,
         propLine: `${stat} ${directionLabel(direction)} ${lineLabel}`,

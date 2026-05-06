@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.parlay_schemas import ParlayLegRead, ParlayRead
-from app.db.models import Parlay, ParlayLeg
-from app.services.settlement import leg_ui_outcome
+from app.api.parlay_schemas import ParlayGameLegRead, ParlayLegRead, ParlayRead
+from app.db.models import Parlay, ParlayGameLeg, ParlayLeg
+from app.services.settlement import game_leg_ui_outcome, leg_ui_outcome
 
 
 def parlay_detail_load_options():
@@ -14,6 +14,7 @@ def parlay_detail_load_options():
     return (
         selectinload(Parlay.legs).selectinload(ParlayLeg.player),
         selectinload(Parlay.legs).selectinload(ParlayLeg.game),
+        selectinload(Parlay.game_legs).selectinload(ParlayGameLeg.game),
     )
 
 
@@ -30,4 +31,10 @@ def parlay_read_with_leg_display(session: Session, parlay: Parlay) -> ParlayRead
         enriched.append(row)
 
     base = ParlayRead.model_validate(parlay)
-    return base.model_copy(update={"legs": enriched})
+    game_legs_sorted = sorted(parlay.game_legs, key=lambda lg: lg.sort_order)
+    game_enriched: list[ParlayGameLegRead] = []
+    for leg in game_legs_sorted:
+        oc = game_leg_ui_outcome(session, leg)
+        row = ParlayGameLegRead.model_validate(leg).model_copy(update={"outcome": oc})
+        game_enriched.append(row)
+    return base.model_copy(update={"legs": enriched, "game_legs": game_enriched})

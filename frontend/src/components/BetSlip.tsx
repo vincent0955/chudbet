@@ -39,7 +39,8 @@ function groupSlipLegs(rows: SlipLegRow[]): SlipGameGroup[] {
   const order: string[] = []
   const map = new Map<string, SlipLegRow[]>()
   for (const row of rows) {
-    const key = row.leg.game_id == null ? '__none__' : String(row.leg.game_id)
+    const gid = row.leg.leg.game_id
+    const key = gid == null ? '__none__' : String(gid)
     if (!map.has(key)) {
       map.set(key, [])
       order.push(key)
@@ -53,7 +54,7 @@ function groupSlipLegs(rows: SlipLegRow[]): SlipGameGroup[] {
       key === '__none__'
         ? 'No specific game'
         : groupRows.map((r) => r.gameSlipHeader).find((h) => h != null && String(h).trim())?.trim() ||
-          `Game #${groupRows[0]!.leg.game_id}`
+          `Game #${groupRows[0]!.leg.leg.game_id}`
     return { key, header, rows: groupRows }
   })
 }
@@ -150,7 +151,12 @@ export function BetSlip() {
         parlay: {
           mode: 'standard',
           wager_on_hit: true,
-          legs: legs.map((r) => r.leg),
+          legs: legs
+            .filter((r): r is SlipLegRow & { leg: { kind: 'player'; leg: import('../api/types').LegIn } } => r.leg.kind === 'player')
+            .map((r) => r.leg.leg),
+          game_legs: legs
+            .filter((r): r is SlipLegRow & { leg: { kind: 'game'; leg: import('../api/types').GameLegIn } } => r.leg.kind === 'game')
+            .map((r) => r.leg.leg),
         },
       })
       await refresh()
