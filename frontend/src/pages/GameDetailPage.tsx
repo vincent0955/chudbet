@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, getGamePropLines, listTeams } from '../api'
 import type { GamePropLinesBundle, TeamRead } from '../api/types'
-import { formatGameDate } from '../components/browse/format'
+import { formatGameDate, formatTipOrGameStatusLabel } from '../components/browse/format'
 import { GamePropBoard } from '../components/game/GamePropBoard'
 
 function parseId(raw: string | undefined): number | null {
@@ -104,6 +104,9 @@ function GameDetailLoaded({ id }: { id: number }) {
   const tmap = new Map(teams.map((t) => [t.id, t.name]))
   const away = teamLabel(tmap, game.away_team_id)
   const home = teamLabel(tmap, game.home_team_id)
+  const slipParts = [`${away} @ ${home}`, formatGameDate(game.game_date)]
+  const tail = formatTipOrGameStatusLabel(game.game_time_utc, game.status)
+  if (tail) slipParts.push(tail)
 
   return (
     <div className="page page--browse page--game-detail">
@@ -123,7 +126,7 @@ function GameDetailLoaded({ id }: { id: number }) {
         <p className="game-detail__nba-id muted">NBA game id {game.nba_game_id}</p>
       </section>
 
-      <GamePropBoard bundle={propLines} />
+      <GamePropBoard bundle={propLines} slipGameHeader={slipParts.join(' · ')} />
     </div>
   )
 }

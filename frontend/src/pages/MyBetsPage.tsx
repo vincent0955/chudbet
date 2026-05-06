@@ -75,7 +75,7 @@ export function MyBetsPage() {
   if (accountId == null) {
     return (
       <section className="my-bets card">
-        <h1 className="my-bets__title">My bets</h1>
+        <h1 className="my-bets__title">My Bets</h1>
         <p className="muted">Set VITE_ACCOUNT_ID in env to use a wallet and see your bets here.</p>
       </section>
     )
@@ -83,7 +83,7 @@ export function MyBetsPage() {
 
   return (
     <section className="my-bets card">
-      <h1 className="my-bets__title">My bets</h1>
+      <h1 className="my-bets__title">My Bets</h1>
 
       <nav className="my-bets__subnav" aria-label="Bet filter">
         <NavLink

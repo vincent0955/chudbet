@@ -13,6 +13,7 @@ def ensure_postgres_schema(engine: Engine) -> None:
         "ALTER TABLE teams ADD COLUMN IF NOT EXISTS nba_team_id INTEGER",
         "ALTER TABLE players ADD COLUMN IF NOT EXISTS nba_player_id INTEGER",
         "ALTER TABLE games ADD COLUMN IF NOT EXISTS nba_game_id VARCHAR(16)",
+        "ALTER TABLE games ADD COLUMN IF NOT EXISTS game_time_utc TIMESTAMPTZ",
         (
             "ALTER TABLE parlays ADD COLUMN IF NOT EXISTS wager_on_hit BOOLEAN "
             "NOT NULL DEFAULT true"

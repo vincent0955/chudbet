@@ -4,10 +4,14 @@ import type { LegIn } from '../api/types'
 export type SlipLegRow = {
   id: string
   leg: LegIn
-  /** Short label, e.g. player · stat · O/U line */
-  primary: string
-  /** Optional context, e.g. game date or matchup */
+  /** Player name (first line on the slip). */
+  playerLine: string
+  /** Stat / side / line without odds (second line, muted). */
+  propLine: string
+  /** Optional hint, e.g. browse “last in row”. */
   secondary?: string
+  /** Shown once per game group when `leg.game_id` is set (matchup · date from the game page). */
+  gameSlipHeader?: string | null
   /** Priced American odds for this selection, when known (e.g. from game props). */
   americanOdds: number | null
 }
@@ -16,7 +20,7 @@ type BetSlipContextValue = {
   legs: SlipLegRow[]
   addLeg: (
     leg: LegIn,
-    display: { primary: string; secondary?: string },
+    display: { playerLine: string; propLine: string; secondary?: string; gameSlipHeader?: string | null },
     americanOdds?: number | null,
   ) => boolean
   hasLeg: (leg: LegIn) => boolean
@@ -57,14 +61,34 @@ export function BetSlipProvider({ children }: { children: ReactNode }) {
   )
 
   const addLeg = useCallback(
-    (leg: LegIn, display: { primary: string; secondary?: string }, americanOdds?: number | null) => {
+    (
+      leg: LegIn,
+      display: {
+        playerLine: string
+        propLine: string
+        secondary?: string
+        gameSlipHeader?: string | null
+      },
+      americanOdds?: number | null,
+    ) => {
       const price = americanOdds ?? null
       let added = false
       setLegs((prev) => {
         if (prev.some((r) => sameLeg(r.leg, leg))) return prev
         if (prev.some((r) => samePropKey(r.leg, leg) && r.leg.direction !== leg.direction)) return prev
         added = true
-        return [...prev, { id: newRowId(), leg, primary: display.primary, secondary: display.secondary, americanOdds: price }]
+        return [
+          ...prev,
+          {
+            id: newRowId(),
+            leg,
+            playerLine: display.playerLine,
+            propLine: display.propLine,
+            secondary: display.secondary,
+            gameSlipHeader: display.gameSlipHeader,
+            americanOdds: price,
+          },
+        ]
       })
       return added
     },

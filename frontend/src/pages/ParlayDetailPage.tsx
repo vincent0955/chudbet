@@ -1,7 +1,100 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, getParlay } from '../api'
-import type { ParlayRead } from '../api/types'
+import type { ParlayLegOutcome, ParlayLegRead, ParlayRead } from '../api/types'
+import { formatHalfPointLine } from '../components/browse/format'
+
+function legOutcomeLabel(o: ParlayLegOutcome | null | undefined): string {
+  switch (o ?? 'pending') {
+    case 'pending':
+      return 'Leg pending'
+    case 'hit':
+      return 'Leg hit'
+    case 'miss':
+      return 'Leg missed'
+    case 'void':
+      return 'Leg void — no result'
+    default:
+      return 'Leg pending'
+  }
+}
+
+function LegOutcomeIcon({ outcome }: { outcome?: ParlayLegOutcome | null }) {
+  const o = outcome ?? 'pending'
+  const label = legOutcomeLabel(o)
+  const circle = (
+    <circle cx="12" cy="12" r="9.25" fill="none" stroke="currentColor" strokeWidth="1.75" />
+  )
+
+  if (o === 'hit') {
+    return (
+      <svg
+        className="parlay-leg__status parlay-leg__status--hit"
+        width={28}
+        height={28}
+        viewBox="0 0 24 24"
+        aria-hidden={false}
+        role="img"
+        aria-label={label}
+      >
+        {circle}
+        <path
+          d="M7.25 12.25 10.5 15.5 17.25 8.25"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+
+  if (o === 'miss') {
+    return (
+      <svg
+        className="parlay-leg__status parlay-leg__status--miss"
+        width={28}
+        height={28}
+        viewBox="0 0 24 24"
+        aria-hidden={false}
+        role="img"
+        aria-label={label}
+      >
+        {circle}
+        <path
+          d="M8 8 16 16M16 8 8 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    )
+  }
+
+  /* pending + void: neutral symbol inside circle */
+  return (
+    <svg
+      className={`parlay-leg__status parlay-leg__status--neutral${o === 'void' ? ' parlay-leg__status--void' : ''}`}
+      width={28}
+      height={28}
+      viewBox="0 0 24 24"
+      aria-hidden={false}
+      role="img"
+      aria-label={label}
+    >
+      {circle}
+      <line x1="7.5" y1="12" x2="16.5" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function formatLegSummary(leg: ParlayLegRead): string {
+  const name = leg.player_full_name?.trim() || `Player #${leg.player_id}`
+  const line = formatHalfPointLine(leg.line)
+  return `${name} · ${leg.stat_type} ${leg.direction} ${line}`
+}
 
 function parseId(raw: string | undefined): number | null {
   if (!raw) return null
@@ -115,6 +208,18 @@ function ParlayDetailLoaded({ id }: { id: number }) {
             <dd>{p.fair_decimal_odds != null ? p.fair_decimal_odds.toFixed(3) : '—'}</dd>
           </div>
         </dl>
+
+        <h2 className="parlay-detail__legs-heading">Parlay legs</h2>
+        <ul className="parlay-leg-list">
+          {[...p.legs]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((leg) => (
+              <li key={leg.id} className="parlay-leg-row">
+                <LegOutcomeIcon outcome={leg.outcome} />
+                <span className="parlay-leg-row__text">{formatLegSummary(leg)}</span>
+              </li>
+            ))}
+        </ul>
       </section>
     </div>
   )

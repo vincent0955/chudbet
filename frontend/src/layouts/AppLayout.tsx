@@ -39,7 +39,7 @@ export function AppLayout() {
                 `app-nav__link${myBetsNavActive(pathname, isActive) ? ' app-nav__link--active' : ''}`
               }
             >
-              My bets
+              My Bets
             </NavLink>
           </nav>
         </div>

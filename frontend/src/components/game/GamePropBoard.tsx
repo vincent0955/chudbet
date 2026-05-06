@@ -1,10 +1,12 @@
 import type { GamePropLinesBundle, PlayerPropLinesRead, StatType } from '../../api/types'
 import { parseAmericanOddsString } from '../../utils/parlayOdds'
 import { useBetSlip } from '../../context/BetSlipContext'
-import { formatGameDate, formatHalfPointLine } from '../browse/format'
+import { formatHalfPointLine } from '../browse/format'
 
 type Props = {
   bundle: GamePropLinesBundle
+  /** Matchup + date for bet slip grouping (same for every leg from this board). */
+  slipGameHeader?: string
 }
 
 const PROP_SECTIONS: { stat: StatType; title: string }[] = [
@@ -31,20 +33,18 @@ function directionLabel(side: 'OVER' | 'UNDER'): string {
 
 function PropPickButtons({
   gameId,
-  gameDateLabel,
+  slipGameHeader,
   player,
   stat,
   line,
-  samplesLen,
   overAmerican,
   underAmerican,
 }: {
   gameId: number
-  gameDateLabel: string
+  slipGameHeader?: string
   player: PlayerPropLinesRead
   stat: StatType
   line: number
-  samplesLen: number
   overAmerican: string
   underAmerican: string
 }) {
@@ -81,8 +81,9 @@ function PropPickButtons({
     addLeg(
       leg,
       {
-        primary: `${player.full_name} · ${stat} ${directionLabel(direction)} ${lineLabel} (${odds})`,
-        secondary: `${player.team_name} · ${gameDateLabel} · Proj. last ${samplesLen} games`,
+        playerLine: player.full_name,
+        propLine: `${stat} ${directionLabel(direction)} ${lineLabel}`,
+        gameSlipHeader: slipGameHeader ?? null,
       },
       parseAmericanOddsString(odds),
     )
@@ -112,10 +113,9 @@ function PropPickButtons({
   )
 }
 
-export function GamePropBoard({ bundle }: Props) {
+export function GamePropBoard({ bundle, slipGameHeader }: Props) {
   const { game, lookback, min_samples, players } = bundle
   const ordered = players
-  const gameDateLabel = formatGameDate(game.game_date)
 
   if (ordered.length === 0) {
     return (
@@ -166,11 +166,10 @@ export function GamePropBoard({ bundle }: Props) {
                     {line != null ? (
                       <PropPickButtons
                         gameId={game.id}
-                        gameDateLabel={gameDateLabel}
+                        slipGameHeader={slipGameHeader}
                         player={player}
                         stat={stat}
                         line={line}
-                        samplesLen={player.sample_size}
                         overAmerican={odds.over}
                         underAmerican={odds.under}
                       />

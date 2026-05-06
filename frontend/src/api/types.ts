@@ -19,6 +19,8 @@ export interface GameRead {
   home_team_id: number
   away_team_id: number
   game_date: ISODateString
+  /** Tip-off from NBA scoreboard (UTC ISO), when known. */
+  game_time_utc?: string | null
   status: string
   nba_game_id: string
 }
@@ -28,6 +30,9 @@ export interface PlayerGameStatRead {
   game_id: number
   nba_game_id: string
   game_date: ISODateString
+  game_time_utc?: string | null
+  /** NBA-derived schedule/status text (home page meta); often tip time before tip-off. */
+  game_status: string
   points: number
   rebounds: number
   assists: number
@@ -67,6 +72,8 @@ export type StatType = 'PTS' | 'REB' | 'AST'
 
 export type LegDirection = 'OVER' | 'UNDER'
 
+export type ParlayLegOutcome = 'pending' | 'hit' | 'miss' | 'void'
+
 export interface LegIn {
   player_id: number
   game_id: number | null
@@ -94,6 +101,8 @@ export interface ParlayLegRead {
   direction: LegDirection
   leg_probability: number
   sort_order: number
+  outcome?: ParlayLegOutcome | null
+  player_full_name?: string | null
 }
 
 export interface ParlayRead {

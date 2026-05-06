@@ -36,5 +36,27 @@ services:
       postgres:
         condition: service_healthy
 
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker.main"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-chudbet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chudbet}
+      POSTGRES_DB: ${POSTGRES_DB:-chudbet}
+      NBA_SEASON: ${NBA_SEASON:-2025-26}
+      # Light ingest: scoreboard-only + recent-first caps optional via WORKER_MAX_GAMES
+      WORKER_INGEST_INTERVAL_SEC: "900"
+      WORKER_SETTLE_INTERVAL_SEC: "120"
+      WORKER_SCOREBOARD_DAYS: "3"
+      WORKER_SKIP_ROSTERS: "true"
+      WORKER_SKIP_GAMES: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:

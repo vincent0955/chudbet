@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -126,6 +126,29 @@ def _parse_game_date(gd_raw: object) -> date:
     return pd.Timestamp(gd_raw).date()
 
 
+def _parse_game_time_utc(raw: object) -> datetime | None:
+    """Parse ScoreboardV3 ``gameTimeUTC`` into timezone-aware UTC."""
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, pd.Timestamp):
+            if pd.isna(raw):
+                return None
+            dt = raw.to_pydatetime()
+        elif isinstance(raw, datetime):
+            dt = raw
+        else:
+            s = str(raw).strip()
+            if not s:
+                return None
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 def sync_games_from_finder(
     session: Session,
     season: str,
@@ -240,6 +263,7 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
         for _, hdr in games_hdr.iterrows():
             nba_gid = str(hdr["gameId"]).strip()
             status_txt = str(hdr.get("gameStatusText") or "").strip()[:64] or "scheduled"
+            tip_utc = _parse_game_time_utc(hdr.get("gameTimeUTC"))
 
             sub = teams_lines[teams_lines["gameId"] == nba_gid]
             if len(sub) != 2:
@@ -273,6 +297,7 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
                     home_team_id=home.id,
                     away_team_id=away.id,
                     game_date=slate,
+                    game_time_utc=tip_utc,
                     status=status_txt,
                 )
                 session.add(existing)
@@ -280,6 +305,8 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
                 existing.home_team_id = home.id
                 existing.away_team_id = away.id
                 existing.status = status_txt[:64]
+                if tip_utc is not None:
+                    existing.game_time_utc = tip_utc
 
             touched.append(existing)
 

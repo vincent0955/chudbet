@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { placeWager } from '../api/endpoints'
-import { useBetSlip } from '../context/BetSlipContext'
+import { useBetSlip, type SlipLegRow } from '../context/BetSlipContext'
 import { useWallet } from '../context/WalletContext'
 import { formatUsdFromCents } from '../lib/formatMoney'
 import {
@@ -28,6 +28,36 @@ function initialExpandedForViewport(): boolean {
   return !window.matchMedia('(max-width: 899px)').matches
 }
 
+type SlipGameGroup = {
+  key: string
+  header: string
+  rows: SlipLegRow[]
+}
+
+/** Preserves slip order: first time a game id appears defines the group order. */
+function groupSlipLegs(rows: SlipLegRow[]): SlipGameGroup[] {
+  const order: string[] = []
+  const map = new Map<string, SlipLegRow[]>()
+  for (const row of rows) {
+    const key = row.leg.game_id == null ? '__none__' : String(row.leg.game_id)
+    if (!map.has(key)) {
+      map.set(key, [])
+      order.push(key)
+    }
+    map.get(key)!.push(row)
+  }
+
+  return order.map((key) => {
+    const groupRows = map.get(key)!
+    const header =
+      key === '__none__'
+        ? 'No specific game'
+        : groupRows.map((r) => r.gameSlipHeader).find((h) => h != null && String(h).trim())?.trim() ||
+          `Game #${groupRows[0]!.leg.game_id}`
+    return { key, header, rows: groupRows }
+  })
+}
+
 export function BetSlip() {
   const navigate = useNavigate()
   const mobile = usePrefersMobileSlip()
@@ -41,6 +71,8 @@ export function BetSlip() {
 
   const showExpanded = !mobile || expanded
   const count = legs.length
+
+  const gameGroups = useMemo(() => groupSlipLegs(legs), [legs])
 
   const combinedParlay = useMemo(() => {
     if (legs.length === 0) return null
@@ -175,7 +207,7 @@ export function BetSlip() {
             <p className="bet-slip__empty-title">Your slip is empty</p>
             <p className="bet-slip__empty-text">
               Add props from a game page (points / rebounds / assists) or the Players browse tab, set a wager, then
-              place your bet. Open tickets live under <strong>My bets</strong>.
+              place your bet. Open tickets live under <strong>My Bets</strong>.
             </p>
           </div>
         ) : (
@@ -193,24 +225,46 @@ export function BetSlip() {
                 Clear all
               </button>
             </div>
-            <ul className="bet-slip__leg-list">
-              {legs.map((row) => (
-                <li key={row.id} className="bet-slip__leg">
-                  <div className="bet-slip__leg-main">
-                    <p className="bet-slip__leg-primary">{row.primary}</p>
-                    {row.secondary && <p className="bet-slip__leg-secondary muted">{row.secondary}</p>}
-                  </div>
-                  <button
-                    type="button"
-                    className="bet-slip__leg-remove"
-                    onClick={() => removeLeg(row.id)}
-                    aria-label={`Remove leg: ${row.primary}`}
+            <div className="bet-slip__leg-groups">
+              {gameGroups.map((group) => {
+                const headId = `${panelId}-game-${group.key === '__none__' ? 'none' : group.key}`
+                return (
+                  <section
+                    key={group.key}
+                    className="bet-slip__game-group"
+                    aria-labelledby={headId}
                   >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    <h3 className="bet-slip__game-head" id={headId}>
+                      {group.header}
+                    </h3>
+                    <ul className="bet-slip__game-leg-list">
+                      {group.rows.map((row) => (
+                        <li key={row.id} className="bet-slip__leg">
+                          <button
+                            type="button"
+                            className="bet-slip__leg-remove"
+                            onClick={() => removeLeg(row.id)}
+                            aria-label={`Remove ${row.playerLine}, ${row.propLine}`}
+                          >
+                            −
+                          </button>
+                          <div className="bet-slip__leg-main">
+                            <p className="bet-slip__leg-player">{row.playerLine}</p>
+                            <p className="bet-slip__leg-prop muted">{row.propLine}</p>
+                            {row.secondary && (
+                              <p className="bet-slip__leg-hint muted">{row.secondary}</p>
+                            )}
+                          </div>
+                          <div className="bet-slip__leg-odds" aria-label="American odds">
+                            {row.americanOdds != null ? formatAmericanOdds(row.americanOdds) : '—'}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )
+              })}
+            </div>
             <div className="bet-slip__stake">
               <label className="bet-slip__stake-field" htmlFor={`${panelId}-stake`}>
                 <span className="bet-slip__stake-label">Wager</span>

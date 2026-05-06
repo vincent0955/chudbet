@@ -53,6 +53,8 @@ def list_player_stats(
                 game_id=stat.game_id,
                 nba_game_id=game.nba_game_id,
                 game_date=game.game_date,
+                game_time_utc=game.game_time_utc,
+                game_status=game.status,
                 points=stat.points,
                 rebounds=stat.rebounds,
                 assists=stat.assists,

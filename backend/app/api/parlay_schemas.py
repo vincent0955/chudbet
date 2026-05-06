@@ -1,9 +1,11 @@
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.db.enums import LegDirection, ParlayMode, StatType
+
+LegOutcomeUi = Literal["pending", "hit", "miss", "void"]
 
 
 class LegIn(BaseModel):
@@ -50,6 +52,14 @@ class ParlayLegRead(BaseModel):
     direction: LegDirection
     leg_probability: float
     sort_order: int
+    outcome: LegOutcomeUi | None = Field(
+        default=None,
+        description="pending / hit / miss / void from live stats vs line (null if not computed).",
+    )
+    player_full_name: str | None = Field(
+        default=None,
+        description="Set when Player relationship is loaded for display.",
+    )
 
 
 class ParlayRead(BaseModel):

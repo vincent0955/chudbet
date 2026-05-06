@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.api.money_schemas import (
     AccountRead,
@@ -15,8 +15,8 @@ from app.api.money_schemas import (
     WagerPlace,
     WagerRead,
 )
-from app.api.parlay_schemas import ParlayRead
 from app.db.models import Account, LedgerEntry, Parlay, Wager
+from app.parlay.display import parlay_detail_load_options, parlay_read_with_leg_display
 from app.db.session import get_db
 from app.services import money
 
@@ -86,7 +86,7 @@ def post_wager(account_id: int, body: WagerPlace, db: Db) -> WagerDetail:
     parlay = db.scalar(
         select(Parlay)
         .where(Parlay.id == wager.parlay_id)
-        .options(selectinload(Parlay.legs)),
+        .options(*parlay_detail_load_options()),
     )
     if parlay is None:
         raise HTTPException(status_code=500, detail="Parlay missing after wager create")
@@ -95,7 +95,7 @@ def post_wager(account_id: int, body: WagerPlace, db: Db) -> WagerDetail:
     return WagerDetail(
         wager=WagerRead.model_validate(wager),
         account=AccountRead.model_validate(account),
-        parlay=ParlayRead.model_validate(parlay),
+        parlay=parlay_read_with_leg_display(db, parlay),
         duplicated=duplicated,
     )
 
@@ -143,13 +143,13 @@ def get_wager(account_id: int, wager_id: int, db: Db) -> WagerDetail:
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     parlay = db.scalar(
-        select(Parlay).where(Parlay.id == wager.parlay_id).options(selectinload(Parlay.legs)),
+        select(Parlay).where(Parlay.id == wager.parlay_id).options(*parlay_detail_load_options()),
     )
     if parlay is None:
         raise HTTPException(status_code=500, detail="Parlay missing for wager")
     return WagerDetail(
         wager=WagerRead.model_validate(wager),
         account=AccountRead.model_validate(account),
-        parlay=ParlayRead.model_validate(parlay),
+        parlay=parlay_read_with_leg_display(db, parlay),
         duplicated=False,
     )

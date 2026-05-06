@@ -154,3 +154,62 @@ def place_wager(
     session.refresh(account)
     session.refresh(wager)
     return wager, account, False
+
+
+def settle_wager_win(session: Session, wager: Wager) -> None:
+    """Credit full quoted return (including stake); caller must only pass OPEN wagers."""
+    if wager.status != WagerStatus.OPEN:
+        raise ValueError("wager is not open")
+    stmt = select(Account).where(Account.id == wager.account_id).with_for_update()
+    account = session.scalar(stmt)
+    if account is None:
+        raise ValueError(f"account {wager.account_id} not found")
+    payout = wager.potential_return_cents
+    new_balance = account.balance_cents + payout
+    account.balance_cents = new_balance
+    session.add(
+        LedgerEntry(
+            account_id=account.id,
+            entry_type=LedgerEntryType.WAGER_PAYOUT,
+            amount_cents=payout,
+            balance_after_cents=new_balance,
+            reference_type="wager",
+            reference_id=wager.id,
+            memo=None,
+        )
+    )
+    wager.status = WagerStatus.WON
+    session.flush()
+
+
+def settle_wager_loss(session: Session, wager: Wager) -> None:
+    if wager.status != WagerStatus.OPEN:
+        raise ValueError("wager is not open")
+    wager.status = WagerStatus.LOST
+    session.flush()
+
+
+def settle_wager_void(session: Session, wager: Wager) -> None:
+    """Refund stake for voided tickets (e.g. missing game or stat)."""
+    if wager.status != WagerStatus.OPEN:
+        raise ValueError("wager is not open")
+    stmt = select(Account).where(Account.id == wager.account_id).with_for_update()
+    account = session.scalar(stmt)
+    if account is None:
+        raise ValueError(f"account {wager.account_id} not found")
+    refund = wager.stake_cents
+    new_balance = account.balance_cents + refund
+    account.balance_cents = new_balance
+    session.add(
+        LedgerEntry(
+            account_id=account.id,
+            entry_type=LedgerEntryType.WAGER_VOID,
+            amount_cents=refund,
+            balance_after_cents=new_balance,
+            reference_type="wager",
+            reference_id=wager.id,
+            memo="Void — refund stake",
+        )
+    )
+    wager.status = WagerStatus.VOID
+    session.flush()

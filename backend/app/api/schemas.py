@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -27,6 +27,7 @@ class GameRead(BaseModel):
     home_team_id: int
     away_team_id: int
     game_date: date
+    game_time_utc: datetime | None = None
     status: str
     nba_game_id: str
 
@@ -40,6 +41,8 @@ class PlayerGameStatRead(BaseModel):
     game_id: int
     nba_game_id: str
     game_date: date
+    game_time_utc: datetime | None = None
+    game_status: str
     points: int
     rebounds: int
     assists: int

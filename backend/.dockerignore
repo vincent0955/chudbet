@@ -5,8 +5,3 @@ __pycache__
 venv
 .env
 *.md
-
-# Omit ingestion package from the API image: Docker BuildKit on Windows (often under OneDrive)
-# can fail with "invalid file request" when transferring this folder. Ingestion does not run
-# inside uvicorn; run the CLI on the host instead (see README).
-app/ingestion/

@@ -1,8 +1,8 @@
 import { useId, useMemo, useState, type FormEvent } from 'react'
 import type { LegIn, PlayerGameStatRead, StatType } from '../../api/types'
 import { useBetSlip } from '../../context/BetSlipContext'
-import { formatAmericanOdds, parseAmericanOddsString } from '../../utils/parlayOdds'
-import { formatGameDate, formatStat } from './format'
+import { parseAmericanOddsString } from '../../utils/parlayOdds'
+import { formatGameDate, formatStat, formatTipOrGameStatusLabel } from './format'
 
 const STAT_TYPES: StatType[] = ['PTS', 'REB', 'AST']
 
@@ -38,9 +38,19 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
   const [submitErr, setSubmitErr] = useState<string | null>(null)
 
   const gameOptions = useMemo(() => {
-    const rows = stats.map((s) => ({ game_id: s.game_id, game_date: s.game_date }))
+    const rows = stats.map((s) => ({
+      game_id: s.game_id,
+      game_date: s.game_date,
+      game_time_utc: s.game_time_utc,
+      game_status: s.game_status,
+    }))
     const seen = new Set<number>()
-    const uniq: { game_id: number; game_date: string }[] = []
+    const uniq: {
+      game_id: number
+      game_date: string
+      game_time_utc?: string | null
+      game_status: string
+    }[] = []
     for (const r of rows) {
       if (seen.has(r.game_id)) continue
       seen.add(r.game_id)
@@ -110,18 +120,27 @@ export function LegPickerForm({ playerId, playerName, teamName, stats, preferred
       americanOdds = p
     }
 
-    const primaryOddsSuffix = americanOdds != null ? ` (${formatAmericanOdds(americanOdds)})` : ''
-    const primary = `${playerName} · ${statType} ${directionLabel(direction)} ${parsed}${primaryOddsSuffix}`
     const gameRow = gid != null ? gameOptions.find((o) => o.game_id === gid) : undefined
-    const secondary = [
-      teamName,
-      gameRow ? formatGameDate(gameRow.game_date) : 'No specific game',
-      statHint,
-    ]
-      .filter(Boolean)
-      .join(' · ')
+    let gameSlipHeader: string | undefined
+    if (gid != null && gameRow) {
+      const headerParts = [formatGameDate(gameRow.game_date)]
+      const tail = formatTipOrGameStatusLabel(gameRow.game_time_utc, gameRow.game_status)
+      if (tail) headerParts.push(tail)
+      headerParts.push(`Game #${gid}`)
+      gameSlipHeader = headerParts.join(' · ')
+    }
+    const secondary = statHint || undefined
 
-    addLeg(leg, { primary, secondary }, americanOdds)
+    addLeg(
+      leg,
+      {
+        playerLine: playerName,
+        propLine: `${statType} ${directionLabel(direction)} ${parsed}`,
+        secondary,
+        gameSlipHeader,
+      },
+      americanOdds,
+    )
   }
 
   return (
