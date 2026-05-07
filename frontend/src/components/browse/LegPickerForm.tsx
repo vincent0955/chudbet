@@ -22,7 +22,7 @@ function statColumn(stat: StatType): keyof Pick<PlayerGameStatRead, 'points' | '
 }
 
 function directionLabel(d: LegIn['direction']): string {
-  return d === 'OVER' ? 'Over' : 'Under'
+  return d === 'OVER' ? 'OVER' : 'UNDER'
 }
 
 export function LegPickerForm({ playerId, playerName, teamName, stats, preferredGameId }: Props) {

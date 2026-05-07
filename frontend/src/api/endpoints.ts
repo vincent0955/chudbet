@@ -43,6 +43,10 @@ export function listWagers(accountId: number, options?: { limit?: number }) {
   return apiRequest<WagerRead[]>(`/accounts/${accountId}/wagers${query({ limit: options?.limit })}`)
 }
 
+export function getWagerDetail(accountId: number, wagerId: number) {
+  return apiRequest<WagerDetailResponse>(`/accounts/${accountId}/wagers/${wagerId}`)
+}
+
 export function listTeams(options?: { limit?: number; offset?: number }) {
   return apiRequest<TeamRead[]>(`/teams${query({ limit: options?.limit, offset: options?.offset })}`)
 }

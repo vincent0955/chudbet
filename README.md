@@ -1,8 +1,6 @@
-# Chudbet
+# ChudBet
 
-Are you tired of your parlays always missing by one leg? Bet on your parlays NOT hitting with ChudBet. 
-
-This repository contains a FastAPI backend, a React (Vite) frontend scaffold, and Docker Compose for local development with PostgreSQL.
+ChutBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet on only a certain amount of legs hitting.
 
 ## Layout
 

@@ -138,6 +138,10 @@ export interface ParlayLegRead {
   sort_order: number
   outcome?: ParlayLegOutcome | null
   player_full_name?: string | null
+  game_label?: string | null
+  game_date?: ISODateString | null
+  game_time_utc?: string | null
+  game_status?: string | null
 }
 
 export interface ParlayRead {
@@ -152,6 +156,8 @@ export interface ParlayRead {
   metadata_json: Record<string, unknown> | null
   legs: ParlayLegRead[]
   game_legs?: ParlayGameLegRead[]
+  stake_cents?: number | null
+  payout_cents?: number | null
   p_miss?: number | null
   p_ticket?: number | null
 }
@@ -166,6 +172,12 @@ export interface ParlayGameLegRead {
   leg_probability: number
   sort_order: number
   outcome?: ParlayLegOutcome | null
+  game_label?: string | null
+  home_team_name?: string | null
+  away_team_name?: string | null
+  game_date?: ISODateString | null
+  game_time_utc?: string | null
+  game_status?: string | null
 }
 
 export interface HealthResponse {

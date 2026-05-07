@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -94,6 +94,10 @@ class ParlayLegRead(BaseModel):
         default=None,
         description="Set when Player relationship is loaded for display.",
     )
+    game_label: str | None = None
+    game_date: date | None = None
+    game_time_utc: datetime | None = None
+    game_status: str | None = None
 
 
 class ParlayGameLegRead(BaseModel):
@@ -108,6 +112,12 @@ class ParlayGameLegRead(BaseModel):
     leg_probability: float
     sort_order: int
     outcome: LegOutcomeUi | None = None
+    game_label: str | None = None
+    home_team_name: str | None = None
+    away_team_name: str | None = None
+    game_date: date | None = None
+    game_time_utc: datetime | None = None
+    game_status: str | None = None
 
 
 class ParlayRead(BaseModel):
@@ -124,6 +134,8 @@ class ParlayRead(BaseModel):
     metadata_json: dict | None
     legs: list[ParlayLegRead]
     game_legs: list[ParlayGameLegRead] = Field(default_factory=list)
+    stake_cents: int | None = None
+    payout_cents: int | None = None
 
     @computed_field
     @property

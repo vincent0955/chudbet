@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { ApiError, getParlay } from '../api'
 import type { ParlayGameLegRead, ParlayLegOutcome, ParlayLegRead, ParlayRead } from '../api/types'
 import { formatHalfPointLine } from '../components/browse/format'
+import { formatUsdFromCents } from '../lib/formatMoney'
+import { decimalToAmerican, formatAmericanOdds } from '../utils/parlayOdds'
 
 function legOutcomeLabel(o: ParlayLegOutcome | null | undefined): string {
   switch (o ?? 'pending') {
@@ -97,15 +99,56 @@ function formatLegSummary(leg: ParlayLegRead): string {
 }
 
 function formatGameLegSummary(leg: ParlayGameLegRead): string {
+  const game = leg.game_label || `Game #${leg.game_id}`
+  const homeTeam = leg.home_team_name || 'Home'
+  const awayTeam = leg.away_team_name || 'Away'
+  const odds = `${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american}`
   if (leg.market_type === 'moneyline') {
-    return `${leg.selection.toUpperCase()} moneyline (${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american})`
+    const team =
+      leg.selection === 'home'
+        ? homeTeam
+        : leg.selection === 'away'
+          ? awayTeam
+          : leg.selection.toUpperCase()
+    return `${team} MONEYLINE (${odds})`
   }
   if (leg.market_type === 'spread') {
     const line = leg.line ?? 0
-    return `${leg.selection.toUpperCase()} spread ${line >= 0 ? '+' : ''}${line.toFixed(1)} (${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american})`
+    const team = leg.selection === 'home' ? homeTeam : awayTeam
+    return `${team} SPREAD ${line >= 0 ? '+' : ''}${line.toFixed(1)} (${odds})`
   }
   const line = leg.line ?? 0
-  return `${leg.selection.toUpperCase()} total ${line.toFixed(1)} (${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american})`
+  const side = leg.selection === 'over' ? 'OVER' : 'UNDER'
+  return `${game} TOTAL ${side} ${line.toFixed(1)} (${odds})`
+}
+
+type GroupRow = { key: string; outcome?: ParlayLegOutcome | null; text: string }
+
+function buildGroups(p: ParlayRead): { game: string; rows: GroupRow[] }[] {
+  const map = new Map<string, GroupRow[]>()
+  const order: string[] = []
+  const push = (game: string, row: GroupRow) => {
+    if (!map.has(game)) {
+      map.set(game, [])
+      order.push(game)
+    }
+    map.get(game)!.push(row)
+  }
+  for (const leg of [...p.legs].sort((a, b) => a.sort_order - b.sort_order)) {
+    push(leg.game_label || 'No specific game', {
+      key: `player-${leg.id}`,
+      outcome: leg.outcome,
+      text: formatLegSummary(leg),
+    })
+  }
+  for (const leg of [...(p.game_legs ?? [])].sort((a, b) => a.sort_order - b.sort_order)) {
+    push(leg.game_label || `Game #${leg.game_id}`, {
+      key: `game-${leg.id}`,
+      outcome: leg.outcome,
+      text: formatGameLegSummary(leg),
+    })
+  }
+  return order.map((game) => ({ game, rows: map.get(game)! }))
 }
 
 function parseId(raw: string | undefined): number | null {
@@ -187,67 +230,43 @@ function ParlayDetailLoaded({ id }: { id: number }) {
   }
 
   const p = state.data
+  const groups = buildGroups(p)
+  const fairAmerican =
+    p.fair_decimal_odds != null && Number.isFinite(p.fair_decimal_odds)
+      ? formatAmericanOdds(decimalToAmerican(p.fair_decimal_odds))
+      : '—'
+  const wagerLabel = p.stake_cents != null ? formatUsdFromCents(p.stake_cents) : '—'
+  const payoutLabel = p.payout_cents != null ? formatUsdFromCents(p.payout_cents) : '—'
   return (
     <div className="page">
       <section className="card">
-        <h1 className="page-title">Parlay #{p.id}</h1>
+        <div className="parlay-detail__head">
+          <h1 className="page-title">Parlay #{p.id}</h1>
+          <p className="parlay-detail__odds">{fairAmerican}</p>
+        </div>
         <p className="page-lede">
           <Link to="/" className="inline-link">
             ← Home
           </Link>
         </p>
-        <dl className="kv">
-          <div className="kv__row">
-            <dt>Mode</dt>
-            <dd>{p.mode}</dd>
-          </div>
-          {p.k_required != null && (
-            <div className="kv__row">
-              <dt>k of y</dt>
-              <dd>{p.k_required}</dd>
-            </div>
-          )}
-          <div className="kv__row">
-            <dt>Legs</dt>
-            <dd>{p.total_legs}</dd>
-          </div>
-          <div className="kv__row">
-            <dt>P(hit)</dt>
-            <dd>{p.p_hit != null ? p.p_hit.toFixed(4) : '—'}</dd>
-          </div>
-          <div className="kv__row">
-            <dt>Fair decimal</dt>
-            <dd>{p.fair_decimal_odds != null ? p.fair_decimal_odds.toFixed(3) : '—'}</dd>
-          </div>
-        </dl>
 
-        <h2 className="parlay-detail__legs-heading">Parlay legs</h2>
-        <ul className="parlay-leg-list">
-          {[...p.legs]
-            .sort((a, b) => a.sort_order - b.sort_order)
-            .map((leg) => (
-              <li key={leg.id} className="parlay-leg-row">
-                <LegOutcomeIcon outcome={leg.outcome} />
-                <span className="parlay-leg-row__text">{formatLegSummary(leg)}</span>
-              </li>
-            ))}
-        </ul>
-
-        {(p.game_legs?.length ?? 0) > 0 && (
-          <>
-            <h2 className="parlay-detail__legs-heading">Game legs</h2>
+        {groups.map((g) => (
+          <div key={g.game}>
+            <h2 className="parlay-detail__legs-heading">{g.game}</h2>
             <ul className="parlay-leg-list">
-              {[...(p.game_legs ?? [])]
-                .sort((a, b) => a.sort_order - b.sort_order)
-                .map((leg) => (
-                  <li key={leg.id} className="parlay-leg-row">
-                    <LegOutcomeIcon outcome={leg.outcome} />
-                    <span className="parlay-leg-row__text">{formatGameLegSummary(leg)}</span>
-                  </li>
-                ))}
+              {g.rows.map((row) => (
+                <li key={row.key} className="parlay-leg-row">
+                  <LegOutcomeIcon outcome={row.outcome} />
+                  <span className="parlay-leg-row__text">{row.text}</span>
+                </li>
+              ))}
             </ul>
-          </>
-        )}
+          </div>
+        ))}
+        <div className="parlay-detail__footer">
+          <span>Wager: {wagerLabel}</span>
+          <span>Payout: {payoutLabel}</span>
+        </div>
       </section>
     </div>
   )

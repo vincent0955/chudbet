@@ -6,9 +6,9 @@ import { useBetSlip, type SlipLegRow } from '../context/BetSlipContext'
 import { useWallet } from '../context/WalletContext'
 import { formatUsdFromCents } from '../lib/formatMoney'
 import {
-  combineAmericanParlay,
   formatAmericanOdds,
   parlayPotentialReturnCents,
+  priceParlayByMode,
 } from '../utils/parlayOdds'
 
 function usePrefersMobileSlip(): boolean {
@@ -67,11 +67,18 @@ export function BetSlip() {
   const { legs, removeLeg, clearLegs } = useBetSlip()
   const { accountId, balanceCents, loading: walletLoading, refresh } = useWallet()
   const [stakeStr, setStakeStr] = useState('')
+  const [antiParlay, setAntiParlay] = useState(false)
+  const [useXofY, setUseXofY] = useState(false)
+  const [kRequired, setKRequired] = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [submitErr, setSubmitErr] = useState<string | null>(null)
 
   const showExpanded = !mobile || expanded
   const count = legs.length
+  const effectiveUseXofY = useXofY && count >= 2
+  const effectiveKRequired = Math.max(1, Math.min(kRequired, count || 1))
+  const mode: 'standard' | 'x_of_y' = effectiveUseXofY ? 'x_of_y' : 'standard'
+  const wagerOnHit = !antiParlay
 
   const gameGroups = useMemo(() => groupSlipLegs(legs), [legs])
 
@@ -79,10 +86,19 @@ export function BetSlip() {
     if (legs.length === 0) return null
     const prices = legs.map((r) => r.americanOdds)
     if (prices.some((p) => p == null)) return { kind: 'incomplete' as const }
-    const packed = combineAmericanParlay(prices as number[])
+    const packed = priceParlayByMode(prices as number[], {
+      mode,
+      kRequired: mode === 'x_of_y' ? effectiveKRequired : null,
+      wagerOnHit,
+    })
     if (!packed) return { kind: 'incomplete' as const }
-    return { kind: 'priced' as const, american: packed.american, payoutDecimal: packed.payoutDecimal }
-  }, [legs])
+    return {
+      kind: 'priced' as const,
+      american: packed.american,
+      payoutDecimal: packed.payoutDecimal,
+      pTicket: packed.pTicket,
+    }
+  }, [effectiveKRequired, legs, mode, wagerOnHit])
 
   const stakeCentsParsed = useMemo(() => {
     const t = stakeStr.trim()
@@ -122,6 +138,7 @@ export function BetSlip() {
     if (count === 0) return ''
     if (submitting || walletLoading) return ''
     if (accountId == null) return 'Configure a wallet id (VITE_ACCOUNT_ID).'
+    if (mode === 'x_of_y' && count < 2) return 'X-of-Y requires at least 2 legs.'
     if (!priced) return 'Every leg needs a price before you can submit.'
     if (stakeCentsParsed == null || stakeCentsParsed < 1) return 'Enter a valid wager.'
     if (overBalance) return 'Wager is larger than your wallet balance.'
@@ -133,6 +150,7 @@ export function BetSlip() {
     priced,
     stakeCentsParsed,
     submitting,
+    mode,
     walletLoading,
   ])
 
@@ -149,15 +167,16 @@ export function BetSlip() {
             ? crypto.randomUUID()
             : `bet-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         parlay: {
-          mode: 'standard',
-          wager_on_hit: true,
+          mode,
+          k_required: mode === 'x_of_y' ? effectiveKRequired : undefined,
+          wager_on_hit: wagerOnHit,
           legs: legs
             .filter((r): r is SlipLegRow & { leg: { kind: 'player'; leg: import('../api/types').LegIn } } => r.leg.kind === 'player')
             .map((r) => r.leg.leg),
           game_legs: legs
             .filter((r): r is SlipLegRow & { leg: { kind: 'game'; leg: import('../api/types').GameLegIn } } => r.leg.kind === 'game')
             .map((r) => r.leg.leg),
-        },
+        }
       })
       await refresh()
       clearLegs()
@@ -292,6 +311,56 @@ export function BetSlip() {
                   />
                 </span>
               </label>
+            </div>
+            <div className="bet-slip__options" role="group" aria-label="Parlay options">
+              <p className="bet-slip__options-label">Parlay options</p>
+              <label className="bet-slip__option-row">
+                <input
+                  type="checkbox"
+                  checked={antiParlay}
+                  onChange={(e) => setAntiParlay(e.target.checked)}
+                />
+                <span>Anti-parlay (win if the condition fails)</span>
+              </label>
+              <label className="bet-slip__option-row">
+                <input
+                  type="checkbox"
+                  checked={useXofY}
+                  disabled={count < 2}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    setUseXofY(on)
+                    if (on) setKRequired(Math.max(1, Math.min(count, Math.max(1, count - 1))))
+                  }}
+                />
+                <span>X-of-Y (minimum legs that must hit)</span>
+              </label>
+              {useXofY && (
+                <label className="bet-slip__k-field" htmlFor={`${panelId}-krequired`}>
+                  <span className="bet-slip__k-label">Minimum hits (K)</span>
+                  <select
+                    id={`${panelId}-krequired`}
+                    className="bet-slip__k-select"
+                    value={effectiveKRequired}
+                    onChange={(e) => setKRequired(Number.parseInt(e.target.value, 10) || 1)}
+                  >
+                    {Array.from({ length: count }, (_, i) => i + 1).map((k) => (
+                      <option key={k} value={k}>
+                        {k} of {count}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <p className="bet-slip__options-hint muted">
+                {mode === 'standard'
+                  ? wagerOnHit
+                    ? 'Standard: ticket wins only if every leg hits.'
+                    : 'Anti standard: ticket wins if at least one leg misses.'
+                  : wagerOnHit
+                    ? `X-of-Y: ticket wins when at least ${effectiveKRequired} of ${count} legs hit.`
+                    : `Anti X-of-Y: ticket wins when fewer than ${effectiveKRequired} of ${count} legs hit.`}
+              </p>
             </div>
             {combinedParlay && (
               <div className="bet-slip__combined">

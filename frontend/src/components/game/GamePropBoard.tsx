@@ -28,7 +28,7 @@ function oddsForStat(player: PlayerPropLinesRead, stat: StatType): { over: strin
 }
 
 function directionLabel(side: 'OVER' | 'UNDER'): string {
-  return side === 'OVER' ? 'Over' : 'Under'
+  return side === 'OVER' ? 'OVER' : 'UNDER'
 }
 
 function PropPickButtons({
