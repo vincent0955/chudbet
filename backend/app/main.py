@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import accounts, db_test, games, health, parlays, players, teams
+from app.api.routes import accounts, auth, db_test, games, health, parlays, players, teams
 from app.db import models  # noqa: F401 — register models before create_all
 from app.db.base import Base
 from app.db.migrate import ensure_postgres_schema
@@ -47,3 +47,4 @@ app.include_router(players.router)
 app.include_router(games.router)
 app.include_router(parlays.router)
 app.include_router(accounts.router)
+app.include_router(auth.router)

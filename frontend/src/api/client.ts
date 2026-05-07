@@ -47,6 +47,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 
   const res = await fetch(url, {
     ...init,
+    credentials: 'include',
     headers: {
       ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,

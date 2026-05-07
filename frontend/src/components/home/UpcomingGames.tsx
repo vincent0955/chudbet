@@ -23,6 +23,22 @@ function localTodayIso(): string {
   return `${y}-${m}-${day}`
 }
 
+function isLiveOrClosedStatus(statusRaw: string | null | undefined): boolean {
+  const s = String(statusRaw ?? '').trim().toUpperCase()
+  if (!s) return false
+  if (s.includes('FINAL') || s.includes('POSTPONED') || s.includes('CANCELLED')) return true
+  if (s.includes('HALFTIME') || s.includes('END OF')) return true
+  if (/^Q[1-4]\b/.test(s) || /^OT\b/.test(s)) return true
+  if (/^\d{1,2}:\d{2}\b/.test(s) && !s.includes('AM') && !s.includes('PM') && !s.includes('ET')) return true
+  return false
+}
+
+function isBettableUpcomingGame(game: GameRead, todayIso: string): boolean {
+  if (game.game_date > todayIso) return true
+  if (game.game_date < todayIso) return false
+  return !isLiveOrClosedStatus(game.status)
+}
+
 type SpreadParts = { line: string; odds: string }
 type TotalParts = { sidePoints: string; odds: string }
 
@@ -249,7 +265,7 @@ export function UpcomingGames() {
   const upcoming = useMemo(() => {
     if (state.kind !== 'ok') return []
     const today = localTodayIso()
-    const filtered = state.games.filter((g) => g.game_date >= today)
+    const filtered = state.games.filter((g) => isBettableUpcomingGame(g, today))
     filtered.sort((a, b) => {
       if (a.game_date !== b.game_date) return a.game_date < b.game_date ? -1 : 1
       return a.id - b.id
@@ -318,9 +334,6 @@ export function UpcomingGames() {
   return (
     <section className="upcoming-games card">
       <h2 className="upcoming-games__title">Upcoming games</h2>
-      <p className="upcoming-games__subtitle muted">
-        Spread, moneyline, and total are rough model estimates from recent scored games.
-      </p>
 
       {upcoming.length === 0 ? (
         <p className="muted upcoming-games__empty">No upcoming games in the feed (try refreshing ingestion).</p>

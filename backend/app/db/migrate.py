@@ -34,6 +34,37 @@ def ensure_postgres_schema(engine: Engine) -> None:
             "ALTER TABLE parlays ADD COLUMN IF NOT EXISTS wager_on_hit BOOLEAN "
             "NOT NULL DEFAULT true"
         ),
+        (
+            "CREATE TABLE IF NOT EXISTS users ("
+            "id SERIAL PRIMARY KEY, "
+            "email VARCHAR(320) NOT NULL UNIQUE, "
+            "username VARCHAR(64) NOT NULL UNIQUE, "
+            "password_hash VARCHAR(512) NOT NULL, "
+            "is_guest BOOLEAN NOT NULL DEFAULT false, "
+            "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+            ")"
+        ),
+        "CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64)",
+        "UPDATE users SET username = COALESCE(username, CONCAT('user', id)) WHERE username IS NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)",
+        "ALTER TABLE users ALTER COLUMN username SET NOT NULL",
+        (
+            "CREATE TABLE IF NOT EXISTS user_sessions ("
+            "id SERIAL PRIMARY KEY, "
+            "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+            "token_hash VARCHAR(128) NOT NULL UNIQUE, "
+            "user_agent VARCHAR(512) NULL, "
+            "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), "
+            "expires_at TIMESTAMPTZ NOT NULL, "
+            "revoked_at TIMESTAMPTZ NULL"
+            ")"
+        ),
+        "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_id ON user_sessions (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_user_sessions_token_hash ON user_sessions (token_hash)",
+        "CREATE INDEX IF NOT EXISTS ix_user_sessions_expires_at ON user_sessions (expires_at)",
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_accounts_user_id ON accounts (user_id)",
     ]
     with engine.begin() as conn:
         for stmt in statements:

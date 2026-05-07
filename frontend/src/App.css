@@ -164,12 +164,38 @@
   font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
+  color: var(--color-text);
   cursor: pointer;
   touch-action: manipulation;
 }
 
 .app-header__profile-action:hover {
   border-color: var(--color-muted);
+}
+
+.app-header__profile-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: 0.8125rem;
+  margin-bottom: var(--space-2);
+}
+
+.signup-page {
+  max-width: 28rem;
+  margin-inline: auto;
+}
+
+.signup-page__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .app-brand {
@@ -1400,6 +1426,23 @@
   gap: var(--space-3);
 }
 
+.bet-slip__auth {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--space-3);
+  background: var(--color-surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.bet-slip__auth-tabs,
+.bet-slip__auth-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .bet-slip__submit-btn {
   width: 100%;
 }
@@ -1610,6 +1653,11 @@
 .my-bets__card-id {
   font-size: 0.875rem;
   font-weight: 700;
+}
+
+.my-bets__card-mode {
+  font-size: 0.75rem;
+  line-height: 1.35;
 }
 
 .my-bets__card-placed {
@@ -2014,12 +2062,52 @@
   --game-props-inline: var(--space-4);
 }
 
+.game-props__section-summary {
+  list-style: none;
+  cursor: pointer;
+  position: relative;
+  display: block;
+  padding-left: calc(var(--space-4) + 0.75rem);
+}
+
+.game-props__section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.game-props__section-summary::before {
+  content: '';
+  position: absolute;
+  left: var(--space-2);
+  top: 50%;
+  width: 0.625rem;
+  height: 0.625rem;
+  background: var(--color-muted);
+  clip-path: polygon(20% 12%, 20% 88%, 85% 50%);
+  transform: translateY(-50%) rotate(90deg);
+  transform-origin: 50% 50%;
+  transition: transform 140ms ease;
+}
+
+.game-props__section:not([open]) .game-props__section-summary::before {
+  transform: translateY(-50%) rotate(0deg);
+}
+
+.game-props__section-summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 .game-props__section-title {
   margin: 0 0 var(--space-4);
-  padding-inline: var(--game-props-inline);
+  padding-inline: 0 var(--game-props-inline);
   font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+
+.game-props__section:not([open]) .game-props__section-title {
+  margin-bottom: 0;
 }
 
 .game-props__head--desktop {

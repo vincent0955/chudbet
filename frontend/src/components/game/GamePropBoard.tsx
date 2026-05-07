@@ -114,8 +114,23 @@ function PropPickButtons({
 }
 
 export function GamePropBoard({ bundle, slipGameHeader }: Props) {
-  const { game, lookback, min_samples, players } = bundle
+  const { game, min_samples, players } = bundle
   const ordered = players
+
+  function topPlayersForStat(stat: StatType): PlayerPropLinesRead[] {
+    const ranked = [...ordered]
+      .filter((p) => lineForStat(p, stat) != null)
+      .sort((a, b) => {
+        const aLine = lineForStat(a, stat) ?? -Infinity
+        const bLine = lineForStat(b, stat) ?? -Infinity
+        if (aLine !== bLine) return bLine - aLine
+        if (a.sample_size !== b.sample_size) return b.sample_size - a.sample_size
+        return a.full_name.localeCompare(b.full_name)
+      })
+    const awayTop = ranked.filter((p) => p.team_id === game.away_team_id).slice(0, 5)
+    const homeTop = ranked.filter((p) => p.team_id === game.home_team_id).slice(0, 5)
+    return [...awayTop, ...homeTop]
+  }
 
   if (ordered.length === 0) {
     return (
@@ -129,60 +144,64 @@ export function GamePropBoard({ bundle, slipGameHeader }: Props) {
 
   return (
     <div className="game-props">
-      <p className="game-props__explainer muted">
-        Showing up to five players per team with the most prior games in our feed (up to {lookback} games each).
-        Lines snap to the nearest value ending in .5 from that rolling average (never a whole number like 22.0).
-        American odds are simulated for layout only and do not reflect real sportsbook markets.
-        At least {min_samples} games with stats are required for a line.
-      </p>
+      {PROP_SECTIONS.map(({ stat, title }) => {
+        const sectionPlayers = topPlayersForStat(stat)
+        return (
+        <details key={stat} className="card game-props__section" open>
+          <summary className="game-props__section-summary">
+            <h2 className="game-props__section-title" id={`game-props-${stat}-title`}>
+              {title}
+            </h2>
+          </summary>
 
-      {PROP_SECTIONS.map(({ stat, title }) => (
-        <section key={stat} className="card game-props__section" aria-labelledby={`game-props-${stat}-title`}>
-          <h2 className="game-props__section-title" id={`game-props-${stat}-title`}>
-            {title}
-          </h2>
+          <div className="game-props__section-body">
+            <div className="game-props__head game-props__head--desktop" aria-hidden>
+              <span className="game-props__th game-props__th--player">Player</span>
+              <span className="game-props__th game-props__th--pick">
+                <span>Over</span>
+                <span>Under</span>
+              </span>
+            </div>
 
-          <div className="game-props__head game-props__head--desktop" aria-hidden>
-            <span className="game-props__th game-props__th--player">Player</span>
-            <span className="game-props__th game-props__th--pick">
-              <span>Over</span>
-              <span>Under</span>
-            </span>
-          </div>
-
-          <ul className="game-props__list">
-            {ordered.map((player) => {
-              const line = lineForStat(player, stat)
-              const odds = oddsForStat(player, stat)
-
-              return (
-                <li key={`${stat}-${player.id}`} className="game-props__row">
-                  <div className="game-props__player">
-                    <span className="game-props__name">{player.full_name}</span>
-                    <span className="game-props__team muted">{player.team_name}</span>
-                  </div>
-
-                  <div className="game-props__pick-cell">
-                    {line != null ? (
-                      <PropPickButtons
-                        gameId={game.id}
-                        slipGameHeader={slipGameHeader}
-                        player={player}
-                        stat={stat}
-                        line={line}
-                        overAmerican={odds.over}
-                        underAmerican={odds.under}
-                      />
-                    ) : (
-                      <span className="game-props__pick-na muted">Need ≥{min_samples} prior games</span>
-                    )}
-                  </div>
+            <ul className="game-props__list">
+              {sectionPlayers.length === 0 && (
+                <li className="game-props__row">
+                  <span className="game-props__pick-na muted">No eligible players yet for this market.</span>
                 </li>
-              )
-            })}
-          </ul>
-        </section>
-      ))}
+              )}
+              {sectionPlayers.map((player) => {
+                const line = lineForStat(player, stat)
+                const odds = oddsForStat(player, stat)
+
+                return (
+                  <li key={`${stat}-${player.id}`} className="game-props__row">
+                    <div className="game-props__player">
+                      <span className="game-props__name">{player.full_name}</span>
+                      <span className="game-props__team muted">{player.team_name}</span>
+                    </div>
+
+                    <div className="game-props__pick-cell">
+                      {line != null ? (
+                        <PropPickButtons
+                          gameId={game.id}
+                          slipGameHeader={slipGameHeader}
+                          player={player}
+                          stat={stat}
+                          line={line}
+                          overAmerican={odds.over}
+                          underAmerican={odds.under}
+                        />
+                      ) : (
+                        <span className="game-props__pick-na muted">Need ≥{min_samples} prior games</span>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </details>
+      )})}
     </div>
   )
 }

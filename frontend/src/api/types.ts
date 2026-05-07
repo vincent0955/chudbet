@@ -217,3 +217,40 @@ export interface WagerDetailResponse {
   parlay: ParlayRead
   duplicated: boolean
 }
+
+export interface DepositBody {
+  amount_cents: number
+  idempotency_key?: string | null
+  memo?: string | null
+}
+
+export interface DepositResult {
+  account: AccountRead
+  ledger_entry_id: number
+  duplicated: boolean
+}
+
+export interface UserRead {
+  id: number
+  email: string
+  username: string
+  is_guest: boolean
+  created_at: string
+}
+
+export interface AuthMeRead {
+  user: UserRead
+  account_id: number
+  balance_cents: number
+}
+
+export interface AuthLoginBody {
+  email: string
+  password: string
+}
+
+export interface AuthSignupBody {
+  email: string
+  username: string
+  password: string
+}

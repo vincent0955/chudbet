@@ -123,7 +123,6 @@ function GameDetailLoaded({ id }: { id: number }) {
           <span className="game-detail__at muted"> @ </span>
           <span className="game-detail__home">{home}</span>
         </h1>
-        <p className="game-detail__nba-id muted">NBA game id {game.nba_game_id}</p>
       </section>
 
       <GamePropBoard bundle={propLines} slipGameHeader={slipParts.join(' · ')} />

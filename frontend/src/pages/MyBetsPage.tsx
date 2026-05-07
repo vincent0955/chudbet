@@ -164,6 +164,15 @@ function groupedLegs(detail: WagerDetailResponse): GroupedGame[] {
   return order.map((game) => ({ game, meta: metaByGame.get(game) ?? '', rows: map.get(game)! }))
 }
 
+function parlayModeLabel(detail: WagerDetailResponse | undefined): string | null {
+  const p = detail?.parlay
+  if (!p) return null
+  const parts: string[] = []
+  if (p.wager_on_hit === false) parts.push('Anti-parlay')
+  if (p.mode === 'x_of_y' && p.k_required != null) parts.push(`${p.k_required}+ legs required`)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 export function MyBetsPage() {
   const { pathname } = useLocation()
   const tab: 'open' | 'settled' = pathname.includes('/bets/settled') ? 'settled' : 'open'
@@ -224,7 +233,7 @@ export function MyBetsPage() {
     return (
       <section className="my-bets card">
         <h1 className="my-bets__title">My Bets</h1>
-        <p className="muted">Set VITE_ACCOUNT_ID in env to use a wallet and see your bets here.</p>
+        <p className="muted">Log in or continue as guest to place bets and see them here.</p>
       </section>
     )
   }
@@ -274,6 +283,7 @@ export function MyBetsPage() {
             const detail = detailsByWager[w.id]
             const groups = detail ? groupedLegs(detail) : []
             const parlay = detail?.parlay
+            const modeLabel = parlayModeLabel(detail)
             const wagerLegCount = (parlay?.legs.length ?? 0) + (parlay?.game_legs?.length ?? 0)
             const fairAmerican =
               parlay?.fair_decimal_odds != null && Number.isFinite(parlay.fair_decimal_odds)
@@ -290,6 +300,7 @@ export function MyBetsPage() {
                 <summary className="my-bets__card-head">
                   <div className="my-bets__card-left">
                     <span className="my-bets__card-id">{wagerLegCount} leg parlay</span>
+                    {modeLabel && <span className="my-bets__card-mode muted">{modeLabel}</span>}
                     <span className="my-bets__card-placed muted">{formatPlacedAt(w.created_at)}</span>
                   </div>
                   <div className="my-bets__card-right">

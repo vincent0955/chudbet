@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.db.models.ledger_entry import LedgerEntry
+    from app.db.models.user import User
     from app.db.models.wager import Wager
 
 
@@ -25,9 +26,11 @@ class Account(Base):
         nullable=False,
     )
     balance_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     ledger_entries: Mapped[list["LedgerEntry"]] = relationship(
         "LedgerEntry",
         back_populates="account",
     )
     wagers: Mapped[list["Wager"]] = relationship("Wager", back_populates="account")
+    user: Mapped["User | None"] = relationship("User", back_populates="accounts")

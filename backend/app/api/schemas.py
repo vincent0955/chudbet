@@ -104,3 +104,30 @@ class GameMarketsRead(BaseModel):
     moneyline: GameMoneylineMarketRead
     spread: GameSpreadMarketRead
     total: GameTotalMarketRead
+
+
+class AuthSignupBody(BaseModel):
+    email: str
+    username: str
+    password: str
+
+
+class AuthLoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    username: str
+    is_guest: bool
+    created_at: datetime
+
+
+class AuthMeRead(BaseModel):
+    user: UserRead
+    account_id: int
+    balance_cents: int

@@ -6,6 +6,7 @@ import { GameDetailPage } from './pages/GameDetailPage'
 import { HomePage } from './pages/HomePage'
 import { MyBetsPage } from './pages/MyBetsPage'
 import { ParlayDetailPage } from './pages/ParlayDetailPage'
+import { SignupPage } from './pages/SignupPage'
 import './App.css'
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
               <Route path="/bets/settled" element={<MyBetsPage />} />
               <Route path="/bets" element={<Navigate to="/bets/open" replace />} />
               <Route path="/parlays/:parlayId" element={<ParlayDetailPage />} />
+              <Route path="/signup" element={<SignupPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

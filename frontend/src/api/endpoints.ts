@@ -1,6 +1,11 @@
 import { apiRequest } from './client'
 import type {
   AccountRead,
+  AuthLoginBody,
+  AuthMeRead,
+  AuthSignupBody,
+  DepositBody,
+  DepositResult,
   GameMarketsRead,
   GamePropLinesBundle,
   GameRead,
@@ -28,8 +33,35 @@ export function getHealth() {
   return apiRequest<HealthResponse>('/health')
 }
 
+export function getAuthMe() {
+  return apiRequest<AuthMeRead>('/auth/me')
+}
+
+export function login(body: AuthLoginBody) {
+  return apiRequest<AuthMeRead>('/auth/login', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function signup(body: AuthSignupBody) {
+  return apiRequest<AuthMeRead>('/auth/signup', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function loginGuest() {
+  return apiRequest<AuthMeRead>('/auth/guest', { method: 'POST' })
+}
+
+export function logout() {
+  return apiRequest<null>('/auth/logout', { method: 'POST' })
+}
+
 export function getAccount(accountId: number) {
   return apiRequest<AccountRead>(`/accounts/${accountId}`)
+}
+
+export function deposit(accountId: number, body: DepositBody) {
+  return apiRequest<DepositResult>(`/accounts/${accountId}/deposit`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 export function placeWager(accountId: number, body: WagerPlaceBody) {

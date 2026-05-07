@@ -9,6 +9,8 @@ from app.db.models.parlay_leg import ParlayLeg
 from app.db.models.player import Player
 from app.db.models.player_game_stats import PlayerGameStat
 from app.db.models.team import Team
+from app.db.models.user import User
+from app.db.models.user_session import UserSession
 from app.db.models.wager import Wager
 
 __all__ = [
@@ -21,5 +23,7 @@ __all__ = [
     "Player",
     "PlayerGameStat",
     "Team",
+    "User",
+    "UserSession",
     "Wager",
 ]

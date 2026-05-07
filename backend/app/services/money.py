@@ -17,8 +17,8 @@ class InsufficientBalanceError(Exception):
     """Raised when available balance is below the requested stake."""
 
 
-def create_account(session: Session) -> Account:
-    row = Account()
+def create_account(session: Session, *, user_id: int | None = None) -> Account:
+    row = Account(user_id=user_id)
     session.add(row)
     session.flush()
     session.refresh(row)

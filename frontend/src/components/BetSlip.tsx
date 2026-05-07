@@ -125,8 +125,7 @@ export function BetSlip() {
   )
 
   const canSubmit = Boolean(
-    accountId != null &&
-      priced &&
+    priced &&
       stakeCentsParsed != null &&
       stakeCentsParsed >= 1 &&
       !overBalance &&
@@ -137,15 +136,15 @@ export function BetSlip() {
   const submitDisabledReason = useMemo(() => {
     if (count === 0) return ''
     if (submitting || walletLoading) return ''
-    if (accountId == null) return 'Configure a wallet id (VITE_ACCOUNT_ID).'
+    if (accountId == null) return 'Log in from the profile menu to place a bet.'
     if (mode === 'x_of_y' && count < 2) return 'X-of-Y requires at least 2 legs.'
     if (!priced) return 'Every leg needs a price before you can submit.'
     if (stakeCentsParsed == null || stakeCentsParsed < 1) return 'Enter a valid wager.'
     if (overBalance) return 'Wager is larger than your wallet balance.'
     return ''
   }, [
-    accountId,
     count,
+    accountId,
     overBalance,
     priced,
     stakeCentsParsed,
@@ -155,7 +154,11 @@ export function BetSlip() {
   ])
 
   const handlePlaceBet = async () => {
-    if (!canSubmit || accountId == null || combinedParlay?.kind !== 'priced' || stakeCentsParsed == null) return
+    if (!canSubmit || combinedParlay?.kind !== 'priced' || stakeCentsParsed == null) return
+    if (accountId == null) {
+      setSubmitErr('Log in from the profile menu to place a bet.')
+      return
+    }
     setSubmitErr(null)
     setSubmitting(true)
     try {
@@ -230,10 +233,6 @@ export function BetSlip() {
         {count === 0 ? (
           <div className="bet-slip__empty">
             <p className="bet-slip__empty-title">Your slip is empty</p>
-            <p className="bet-slip__empty-text">
-              Add props from a game page (points / rebounds / assists) or the Players browse tab, set a wager, then
-              place your bet. Open tickets live under <strong>My Bets</strong>.
-            </p>
           </div>
         ) : (
           <div className="bet-slip__legs">

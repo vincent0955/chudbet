@@ -15,15 +15,26 @@ from app.api.money_schemas import (
     WagerPlace,
     WagerRead,
 )
+from app.api.auth import get_current_user
 from app.db.models import Account, LedgerEntry, Parlay, Wager
 from app.parlay.display import parlay_detail_load_options, parlay_read_with_leg_display
 from app.db.session import get_db
 from app.services import money
+from app.db.models import User
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
 Db = Annotated[Session, Depends(get_db)]
+
+
+def _require_account_access(db: Session, account_id: int, user: User) -> Account:
+    row = db.get(Account, account_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if row.user_id is None or row.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return row
 
 
 @router.post("", response_model=AccountRead, status_code=201)
@@ -35,15 +46,14 @@ def post_account(db: Db) -> AccountRead:
 
 
 @router.get("/{account_id}", response_model=AccountRead)
-def get_account(account_id: int, db: Db) -> AccountRead:
-    row = db.get(Account, account_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Account not found")
+def get_account(account_id: int, db: Db, user: User = Depends(get_current_user)) -> AccountRead:
+    row = _require_account_access(db, account_id, user)
     return AccountRead.model_validate(row)
 
 
 @router.post("/{account_id}/deposit", response_model=DepositResult)
-def post_deposit(account_id: int, body: DepositBody, db: Db) -> DepositResult:
+def post_deposit(account_id: int, body: DepositBody, db: Db, user: User = Depends(get_current_user)) -> DepositResult:
+    _require_account_access(db, account_id, user)
     try:
         account, entry, duplicated = money.deposit(
             db,
@@ -65,7 +75,8 @@ def post_deposit(account_id: int, body: DepositBody, db: Db) -> DepositResult:
 
 
 @router.post("/{account_id}/wagers", response_model=WagerDetail)
-def post_wager(account_id: int, body: WagerPlace, db: Db) -> WagerDetail:
+def post_wager(account_id: int, body: WagerPlace, db: Db, user: User = Depends(get_current_user)) -> WagerDetail:
+    _require_account_access(db, account_id, user)
     try:
         wager, account, duplicated = money.place_wager(
             db,
@@ -104,10 +115,10 @@ def post_wager(account_id: int, body: WagerPlace, db: Db) -> WagerDetail:
 def list_wagers(
     account_id: int,
     db: Db,
+    user: User = Depends(get_current_user),
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[WagerRead]:
-    if db.get(Account, account_id) is None:
-        raise HTTPException(status_code=404, detail="Account not found")
+    _require_account_access(db, account_id, user)
     rows = db.scalars(
         select(Wager)
         .where(Wager.account_id == account_id)
@@ -121,10 +132,10 @@ def list_wagers(
 def list_ledger(
     account_id: int,
     db: Db,
+    user: User = Depends(get_current_user),
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[LedgerEntryRead]:
-    if db.get(Account, account_id) is None:
-        raise HTTPException(status_code=404, detail="Account not found")
+    _require_account_access(db, account_id, user)
     rows = db.scalars(
         select(LedgerEntry)
         .where(LedgerEntry.account_id == account_id)
@@ -135,7 +146,8 @@ def list_ledger(
 
 
 @router.get("/{account_id}/wagers/{wager_id}", response_model=WagerDetail)
-def get_wager(account_id: int, wager_id: int, db: Db) -> WagerDetail:
+def get_wager(account_id: int, wager_id: int, db: Db, user: User = Depends(get_current_user)) -> WagerDetail:
+    _require_account_access(db, account_id, user)
     wager = db.get(Wager, wager_id)
     if wager is None or wager.account_id != account_id:
         raise HTTPException(status_code=404, detail="Wager not found")

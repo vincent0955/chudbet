@@ -9,48 +9,113 @@ import {
   type ReactNode,
 } from 'react'
 import { ApiError } from '../api/client'
-import { getAccount } from '../api/endpoints'
-import { getConfiguredAccountId } from '../lib/env'
+import { deposit, getAuthMe, login, loginGuest, logout, signup } from '../api/endpoints'
+import type { UserRead } from '../api/types'
 
 type WalletContextValue = {
+  user: UserRead | null
   accountId: number | null
   balanceCents: number | null
   loading: boolean
   error: string | null
   refresh: () => Promise<void>
+  login: (email: string, password: string) => Promise<void>
+  signup: (email: string, username: string, password: string) => Promise<void>
+  guestLogin: () => Promise<void>
+  logout: () => Promise<void>
+  addMoney: (amountCents: number) => Promise<void>
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null)
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const accountId = useMemo(() => getConfiguredAccountId(), [])
+  const [user, setUser] = useState<UserRead | null>(null)
+  const [accountId, setAccountId] = useState<number | null>(null)
   const [balanceCents, setBalanceCents] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    if (accountId == null) {
-      setLoading(false)
-      setBalanceCents(null)
-      setError(null)
-      return
-    }
     setLoading(true)
     setError(null)
     try {
-      const acc = await getAccount(accountId)
-      setBalanceCents(acc.balance_cents)
+      const me = await getAuthMe()
+      setUser(me.user)
+      setAccountId(me.account_id)
+      setBalanceCents(me.balance_cents)
     } catch (e) {
       if (e instanceof ApiError) {
-        setError(e.status === 404 ? 'Wallet not found for this account id.' : e.message)
+        if (e.status === 401) {
+          setUser(null)
+          setAccountId(null)
+          setBalanceCents(null)
+          setError(null)
+          return
+        }
+        setError(e.message)
       } else {
         setError(e instanceof Error ? e.message : 'Could not load balance.')
       }
+      setUser(null)
+      setAccountId(null)
       setBalanceCents(null)
     } finally {
       setLoading(false)
     }
-  }, [accountId])
+  }, [])
+
+  const loginWithPassword = useCallback(async (email: string, password: string) => {
+    const me = await login({ email, password })
+    setUser(me.user)
+    setAccountId(me.account_id)
+    setBalanceCents(me.balance_cents)
+    setError(null)
+  }, [])
+
+  const signupWithPassword = useCallback(async (email: string, username: string, password: string) => {
+    const me = await signup({ email, username, password })
+    setUser(me.user)
+    setAccountId(me.account_id)
+    setBalanceCents(me.balance_cents)
+    setError(null)
+  }, [])
+
+  const guestLogin = useCallback(async () => {
+    const me = await loginGuest()
+    setUser(me.user)
+    setAccountId(me.account_id)
+    setBalanceCents(me.balance_cents)
+    setError(null)
+  }, [])
+
+  const logoutUser = useCallback(async () => {
+    try {
+      await logout()
+    } catch {
+      // Even if network/logout endpoint fails, force local signed-out state.
+    } finally {
+      setUser(null)
+      setAccountId(null)
+      setBalanceCents(null)
+      setError(null)
+    }
+  }, [])
+
+  const addMoney = useCallback(
+    async (amountCents: number) => {
+      if (accountId == null) throw new Error('Not logged in')
+      await deposit(accountId, {
+        amount_cents: amountCents,
+        idempotency_key:
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `dep-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        memo: 'Manual top-up',
+      })
+      await refresh()
+    },
+    [accountId, refresh],
+  )
 
   useEffect(() => {
     startTransition(() => {
@@ -59,7 +124,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   useEffect(() => {
-    if (accountId == null) return
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         startTransition(() => void refresh())
@@ -72,17 +136,35 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [accountId, refresh])
+  }, [refresh])
 
   const value = useMemo(
     () => ({
+      user,
       accountId,
       balanceCents,
       loading,
       error,
       refresh,
+      login: loginWithPassword,
+      signup: signupWithPassword,
+      guestLogin,
+      logout: logoutUser,
+      addMoney,
     }),
-    [accountId, balanceCents, loading, error, refresh],
+    [
+      user,
+      accountId,
+      balanceCents,
+      loading,
+      error,
+      refresh,
+      loginWithPassword,
+      signupWithPassword,
+      guestLogin,
+      logoutUser,
+      addMoney,
+    ],
   )
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>

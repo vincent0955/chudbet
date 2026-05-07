@@ -13,7 +13,6 @@ from app.db.models import Game, Player, PlayerGameStat, Team
 
 GAME_PROP_LOOKBACK = 10
 GAME_PROP_MIN_SAMPLES = 3
-TOP_PLAYERS_PER_TEAM = 5
 BOOK_MARGIN = 0.14
 
 
@@ -152,16 +151,7 @@ def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle
             )
         )
 
-    by_tid: dict[int, list[PlayerPropLinesRead]] = defaultdict(list)
-    for row in players_build:
-        by_tid[row.team_id].append(row)
-
-    def pick_top(team_id: int) -> list[PlayerPropLinesRead]:
-        rows = by_tid.get(team_id, [])
-        rows = sorted(rows, key=lambda r: (-r.sample_size, r.full_name.lower()))
-        return rows[:TOP_PLAYERS_PER_TEAM]
-
-    players_out = pick_top(game.away_team_id) + pick_top(game.home_team_id)
+    players_out = sorted(players_build, key=lambda r: (r.team_name.lower(), r.full_name.lower()))
 
     return GamePropLinesBundle(
         game=GameRead.model_validate(game),
