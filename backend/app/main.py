@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import accounts, auth, db_test, games, health, parlays, players, teams
+from app.core.config import get_cors_origins
 from app.db import models  # noqa: F401 — register models before create_all
 from app.db.base import Base
 from app.db.migrate import ensure_postgres_schema
@@ -31,10 +32,7 @@ app = FastAPI(title="Chudbet API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

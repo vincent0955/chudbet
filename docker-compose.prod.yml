@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      CHUDBET_CORS_ORIGINS: ${CHUDBET_CORS_ORIGINS}
+      CHUDBET_SEED_DEMO_WALLET: ${CHUDBET_SEED_DEMO_WALLET:-false}
+      CHUDBET_DEMO_ACCOUNT_ID: ${CHUDBET_DEMO_ACCOUNT_ID:-1}
+      CHUDBET_DEMO_WALLET_CENTS: ${CHUDBET_DEMO_WALLET_CENTS:-10000000}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app_net
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker.main"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      NBA_SEASON: ${NBA_SEASON:-2025-26}
+      WORKER_INGEST_INTERVAL_SEC: ${WORKER_INGEST_INTERVAL_SEC:-900}
+      WORKER_SETTLE_INTERVAL_SEC: ${WORKER_SETTLE_INTERVAL_SEC:-120}
+      WORKER_SCOREBOARD_DAYS: ${WORKER_SCOREBOARD_DAYS:-3}
+      WORKER_SKIP_ROSTERS: ${WORKER_SKIP_ROSTERS:-true}
+      WORKER_SKIP_GAMES: ${WORKER_SKIP_GAMES:-true}
+      WORKER_MAX_GAMES: ${WORKER_MAX_GAMES:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_net
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app_net
+
+networks:
+  app_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

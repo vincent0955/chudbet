@@ -1,0 +1,9 @@
+[Unit]
+Description=Chudbet Postgres backup to S3
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/chudbet
+ExecStart=/opt/chudbet/infra/ops/backup_postgres_to_s3.sh
