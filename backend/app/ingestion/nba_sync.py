@@ -26,11 +26,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Game, Player, PlayerGameStat, Team
 from app.ingestion.minutes import normalize_stat_int, parse_minutes
-from app.ingestion.nba_http_patch import apply_nba_http_patches
 
 logger = logging.getLogger(__name__)
-
-apply_nba_http_patches()
 
 REQUEST_PAUSE_SEC = 0.65
 NBA_CALENDAR_TZ = ZoneInfo("America/New_York")
