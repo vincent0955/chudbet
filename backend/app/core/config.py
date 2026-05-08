@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from urllib.parse import quote_plus
 
 
 @lru_cache
@@ -12,7 +13,9 @@ def get_database_url() -> str:
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     db = os.getenv("POSTGRES_DB", "chudbet")
-    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+    u = quote_plus(user, safe="")
+    p = quote_plus(password, safe="")
+    return f"postgresql+psycopg2://{u}:{p}@{host}:{port}/{db}"
 
 
 @lru_cache
