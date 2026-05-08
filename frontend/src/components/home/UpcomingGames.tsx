@@ -38,7 +38,19 @@ function isLiveOrClosedStatus(statusRaw: string | null | undefined): boolean {
   return false
 }
 
+/** NBA slate rows with no tip-off yet (TBD status and/or missing UTC tip). */
+function hasUnsetTipOrTbdStatus(game: GameRead, todayIso: string): boolean {
+  const st = String(game.status ?? '').trim().toUpperCase()
+  if (st.includes('TBD')) return true
+  if (game.game_date > todayIso) {
+    const tip = game.game_time_utc
+    if (tip == null || String(tip).trim() === '') return true
+  }
+  return false
+}
+
 function isBettableUpcomingGame(game: GameRead, todayIso: string): boolean {
+  if (hasUnsetTipOrTbdStatus(game, todayIso)) return false
   if (game.game_date > todayIso) return true
   if (game.game_date < todayIso) return false
   return !isLiveOrClosedStatus(game.status)
