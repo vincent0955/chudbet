@@ -40,10 +40,25 @@ def _leg_stat_hit(value: float, line: float, direction: LegDirection) -> bool:
 LegUiOutcome = Literal["pending", "hit", "miss", "void"]
 
 
-def leg_ui_outcome(session: Session, leg: ParlayLeg) -> LegUiOutcome:
-    """How to display one leg on the parlay page (matches settlement grading rules)."""
-    r = _evaluate_leg(session, leg)
+def _ui_from_eval_result(r: Literal["win", "loss", "void", "pending"]) -> LegUiOutcome:
     return {"pending": "pending", "void": "void", "win": "hit", "loss": "miss"}[r]
+
+
+def _normalize_persisted_outcome(value: str | None) -> LegUiOutcome | None:
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if v in ("pending", "hit", "miss", "void"):
+        return v  # type: ignore[return-value]
+    return None
+
+
+def leg_ui_outcome(session: Session, leg: ParlayLeg) -> LegUiOutcome:
+    """How to display one leg on the parlay page."""
+    persisted = _normalize_persisted_outcome(getattr(leg, "outcome_status", None))
+    if persisted is not None:
+        return persisted
+    return _ui_from_eval_result(_evaluate_leg(session, leg))
 
 
 def _evaluate_leg(session: Session, leg: ParlayLeg) -> Literal["win", "loss", "void", "pending"]:
@@ -52,14 +67,15 @@ def _evaluate_leg(session: Session, leg: ParlayLeg) -> Literal["win", "loss", "v
     game = session.get(Game, leg.game_id)
     if game is None:
         return "void"
-    if not _is_final_status(game.status):
-        return "pending"
     row = session.scalar(
         select(PlayerGameStat).where(
             PlayerGameStat.player_id == leg.player_id,
             PlayerGameStat.game_id == leg.game_id,
         )
     )
+    # Prefer concrete stat availability over status text; this avoids stale-status tickets staying pending.
+    if row is None and not _is_final_status(game.status):
+        return "pending"
     if row is None:
         return "void"
     val = float(_stat_value(row, leg.stat_type))
@@ -67,18 +83,23 @@ def _evaluate_leg(session: Session, leg: ParlayLeg) -> Literal["win", "loss", "v
 
 
 def game_leg_ui_outcome(session: Session, leg: ParlayGameLeg) -> LegUiOutcome:
-    r = _evaluate_game_leg(session, leg)
-    return {"pending": "pending", "void": "void", "win": "hit", "loss": "miss"}[r]
+    persisted = _normalize_persisted_outcome(getattr(leg, "outcome_status", None))
+    if persisted is not None:
+        return persisted
+    return _ui_from_eval_result(_evaluate_game_leg(session, leg))
 
 
 def _evaluate_game_leg(session: Session, leg: ParlayGameLeg) -> Literal["win", "loss", "void", "pending"]:
     game = session.get(Game, leg.game_id)
     if game is None:
         return "void"
-    if not _is_final_status(game.status):
-        return "pending"
+    # Prefer concrete scoreboard availability over status text, but treat 0-0 non-final as placeholder (pending).
     if game.home_score is None or game.away_score is None:
+        if not _is_final_status(game.status):
+            return "pending"
         return "void"
+    if game.home_score == 0 and game.away_score == 0 and not _is_final_status(game.status):
+        return "pending"
 
     home = float(game.home_score)
     away = float(game.away_score)
@@ -182,9 +203,13 @@ def settle_open_wagers(session: Session) -> dict[str, int]:
         legs = sorted(parlay.legs, key=lambda x: x.sort_order)
         game_legs = sorted(parlay.game_legs, key=lambda x: x.sort_order)
         try:
-            leg_results = [_evaluate_leg(session, lg) for lg in legs] + [
-                _evaluate_game_leg(session, gl) for gl in game_legs
-            ]
+            leg_eval_results = [_evaluate_leg(session, lg) for lg in legs]
+            game_leg_eval_results = [_evaluate_game_leg(session, gl) for gl in game_legs]
+            for lg, ev in zip(legs, leg_eval_results, strict=False):
+                lg.outcome_status = _ui_from_eval_result(ev)
+            for gl, ev in zip(game_legs, game_leg_eval_results, strict=False):
+                gl.outcome_status = _ui_from_eval_result(ev)
+            leg_results = leg_eval_results + game_leg_eval_results
             outcome = _resolve_ticket(parlay, leg_results)
             if outcome == "pending":
                 counts["pending"] += 1

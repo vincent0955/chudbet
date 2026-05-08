@@ -300,7 +300,7 @@ export function MyBetsPage() {
                 <summary className="my-bets__card-head">
                   <div className="my-bets__card-left">
                     <span className="my-bets__card-id">{wagerLegCount} leg parlay</span>
-                    {modeLabel && <span className="my-bets__card-mode muted">{modeLabel}</span>}
+                    {modeLabel && <span className="my-bets__card-mode">{modeLabel}</span>}
                     <span className="my-bets__card-placed muted">{formatPlacedAt(w.created_at)}</span>
                   </div>
                   <div className="my-bets__card-right">

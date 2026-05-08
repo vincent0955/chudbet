@@ -65,6 +65,8 @@ def ensure_postgres_schema(engine: Engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_user_sessions_expires_at ON user_sessions (expires_at)",
         "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL",
         "CREATE INDEX IF NOT EXISTS ix_accounts_user_id ON accounts (user_id)",
+        "ALTER TABLE parlay_legs ADD COLUMN IF NOT EXISTS outcome_status VARCHAR(16) NOT NULL DEFAULT 'pending'",
+        "ALTER TABLE parlay_game_legs ADD COLUMN IF NOT EXISTS outcome_status VARCHAR(16) NOT NULL DEFAULT 'pending'",
     ]
     with engine.begin() as conn:
         for stmt in statements:

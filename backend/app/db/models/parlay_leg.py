@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Float, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Integer, String, UniqueConstraint, text
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,6 +50,12 @@ class ParlayLeg(Base):
     )
     leg_probability: Mapped[float] = mapped_column(Float, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+    )
 
     parlay: Mapped["Parlay"] = relationship("Parlay", back_populates="legs")
     player: Mapped["Player"] = relationship("Player", back_populates="parlay_legs")
