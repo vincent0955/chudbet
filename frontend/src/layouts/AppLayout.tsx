@@ -19,32 +19,34 @@ export function AppLayout() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div className="app-header__left">
-          <Link to="/" className="app-brand">
-            ChudBet
-          </Link>
-          <nav className="app-nav" aria-label="Main">
-            <NavLink
-              to="/"
-              end
-              className={({ isActive }) =>
-                `app-nav__link${isActive ? ' app-nav__link--active' : ''}`
-              }
-            >
-              Home
-            </NavLink>
-            <NavLink
-              to="/bets/open"
-              className={({ isActive }) =>
-                `app-nav__link${myBetsNavActive(pathname, isActive) ? ' app-nav__link--active' : ''}`
-              }
-            >
-              My Bets
-            </NavLink>
-          </nav>
-        </div>
-        <div className="app-header__right">
-          <HeaderWallet />
+        <div className="app-header__inner">
+          <div className="app-header__left">
+            <Link to="/" className="app-brand">
+              ChudBet
+            </Link>
+            <nav className="app-nav" aria-label="Main">
+              <NavLink
+                to="/"
+                end
+                className={({ isActive }) =>
+                  `app-nav__link${isActive ? ' app-nav__link--active' : ''}`
+                }
+              >
+                Home
+              </NavLink>
+              <NavLink
+                to="/bets/open"
+                className={({ isActive }) =>
+                  `app-nav__link${myBetsNavActive(pathname, isActive) ? ' app-nav__link--active' : ''}`
+                }
+              >
+                My Bets
+              </NavLink>
+            </nav>
+          </div>
+          <div className="app-header__right">
+            <HeaderWallet />
+          </div>
         </div>
       </header>
 

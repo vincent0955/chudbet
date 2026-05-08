@@ -4,6 +4,7 @@ import { ApiError, getParlay } from '../api'
 import type { ParlayGameLegRead, ParlayLegOutcome, ParlayLegRead, ParlayRead } from '../api/types'
 import { formatHalfPointLine } from '../components/browse/format'
 import { formatUsdFromCents } from '../lib/formatMoney'
+import { nbaPlayerHeadshotUrl, nbaTeamLogoUrl } from '../lib/nbaMedia'
 import { decimalToAmerican, formatAmericanOdds } from '../utils/parlayOdds'
 
 function legOutcomeLabel(o: ParlayLegOutcome | null | undefined): string {
@@ -110,45 +111,102 @@ function formatGameLegSummary(leg: ParlayGameLegRead): string {
         : leg.selection === 'away'
           ? awayTeam
           : leg.selection.toUpperCase()
-    return `${team} MONEYLINE (${odds})`
+    return `${team} · MONEYLINE (${odds})`
   }
   if (leg.market_type === 'spread') {
     const line = leg.line ?? 0
     const team = leg.selection === 'home' ? homeTeam : awayTeam
-    return `${team} SPREAD ${line >= 0 ? '+' : ''}${line.toFixed(1)} (${odds})`
+    return `${team} · SPREAD ${line >= 0 ? '+' : ''}${line.toFixed(1)} (${odds})`
   }
   const line = leg.line ?? 0
   const side = leg.selection === 'over' ? 'OVER' : 'UNDER'
-  return `${game} TOTAL ${side} ${line.toFixed(1)} (${odds})`
+  return `${game} · TOTAL ${side} ${line.toFixed(1)} (${odds})`
 }
 
-type GroupRow = { key: string; outcome?: ParlayLegOutcome | null; text: string }
+type GroupRow = {
+  key: string
+  outcome?: ParlayLegOutcome | null
+  text: string
+  kind: 'player' | 'game'
+  direction?: 'OVER' | 'UNDER'
+  line?: number
+  statValue?: number | null
+  playerImageUrl?: string | null
+  playerTeamLogoUrl?: string | null
+}
 
-function buildGroups(p: ParlayRead): { game: string; rows: GroupRow[] }[] {
+type Group = {
+  game: string
+  scoreLabel?: string
+  scoreIsFinal?: boolean
+  rows: GroupRow[]
+}
+
+const PROGRESS_THRESHOLD_PCT = 80
+
+function isFinalStatus(status: string | null | undefined): boolean {
+  return (status ?? '').toLowerCase().includes('final')
+}
+
+function buildGroups(p: ParlayRead): Group[] {
   const map = new Map<string, GroupRow[]>()
+  const scoreByGame = new Map<string, string | undefined>()
+  const finalByGame = new Map<string, boolean>()
   const order: string[] = []
-  const push = (game: string, row: GroupRow) => {
+  const push = (game: string, row: GroupRow, gameStatus?: string | null) => {
     if (!map.has(game)) {
       map.set(game, [])
       order.push(game)
+      finalByGame.set(game, false)
+    }
+    if (isFinalStatus(gameStatus)) {
+      finalByGame.set(game, true)
     }
     map.get(game)!.push(row)
   }
   for (const leg of [...p.legs].sort((a, b) => a.sort_order - b.sort_order)) {
-    push(leg.game_label || 'No specific game', {
+    const groupKey = leg.game_label || 'No specific game'
+    if (!scoreByGame.has(groupKey) && leg.game_home_score != null && leg.game_away_score != null) {
+      scoreByGame.set(groupKey, `${leg.game_away_score} - ${leg.game_home_score}`)
+    }
+    push(groupKey, {
       key: `player-${leg.id}`,
       outcome: leg.outcome,
       text: formatLegSummary(leg),
-    })
+      kind: 'player',
+      direction: leg.direction,
+      line: leg.line,
+      statValue: leg.stat_value,
+      playerImageUrl: nbaPlayerHeadshotUrl(leg.player_nba_id),
+      playerTeamLogoUrl: nbaTeamLogoUrl(leg.player_team_nba_id),
+    }, leg.game_status)
   }
   for (const leg of [...(p.game_legs ?? [])].sort((a, b) => a.sort_order - b.sort_order)) {
-    push(leg.game_label || `Game #${leg.game_id}`, {
+    const groupKey = leg.game_label || `Game #${leg.game_id}`
+    if (!scoreByGame.has(groupKey) && leg.home_score != null && leg.away_score != null) {
+      scoreByGame.set(groupKey, `${leg.away_score} - ${leg.home_score}`)
+    }
+    push(groupKey, {
       key: `game-${leg.id}`,
       outcome: leg.outcome,
       text: formatGameLegSummary(leg),
-    })
+      kind: 'game',
+    }, leg.game_status)
   }
-  return order.map((game) => ({ game, rows: map.get(game)! }))
+  return order.map((game) => ({
+    game,
+    scoreLabel: scoreByGame.get(game),
+    scoreIsFinal: finalByGame.get(game) ?? false,
+    rows: map.get(game)!,
+  }))
+}
+
+function playerProgressValue(currentValue: number | null | undefined, line: number | undefined): number {
+  if (currentValue == null || line == null || line <= 0) return 0
+  const ratio = currentValue / line
+  if (ratio <= 1) return Math.max(0, Math.min(PROGRESS_THRESHOLD_PCT, ratio * PROGRESS_THRESHOLD_PCT))
+  const overflowPct = (ratio - 1) * (100 - PROGRESS_THRESHOLD_PCT)
+  return Math.max(PROGRESS_THRESHOLD_PCT, Math.min(100, PROGRESS_THRESHOLD_PCT + overflowPct))
 }
 
 function parseId(raw: string | undefined): number | null {
@@ -252,12 +310,49 @@ function ParlayDetailLoaded({ id }: { id: number }) {
 
         {groups.map((g) => (
           <div key={g.game}>
-            <h2 className="parlay-detail__legs-heading">{g.game}</h2>
+            <h2 className="parlay-detail__legs-heading">
+              <span>{g.game}</span>
+              {g.scoreLabel ? (
+                <span className="parlay-detail__game-score-wrap">
+                  {g.scoreIsFinal ? <span className="parlay-detail__game-final">FINAL</span> : null}
+                  <span className="parlay-detail__game-score">{g.scoreLabel}</span>
+                </span>
+              ) : null}
+            </h2>
             <ul className="parlay-leg-list">
               {g.rows.map((row) => (
                 <li key={row.key} className="parlay-leg-row">
                   <LegOutcomeIcon outcome={row.outcome} />
-                  <span className="parlay-leg-row__text">{row.text}</span>
+                  {row.playerImageUrl ? (
+                    <span className="parlay-leg-row__player-image-wrap">
+                      <img src={row.playerImageUrl} alt="" className="parlay-leg-row__player-image" loading="lazy" />
+                      {row.playerTeamLogoUrl ? (
+                        <img src={row.playerTeamLogoUrl} alt="" className="parlay-leg-row__player-team-badge" loading="lazy" />
+                      ) : null}
+                    </span>
+                  ) : null}
+                  <div className="parlay-leg-row__body">
+                    <span className="parlay-leg-row__text">{row.text}</span>
+                    {row.kind === 'player' ? (
+                      <div className="parlay-leg-progress">
+                        <div className="parlay-leg-progress__meta">
+                          <span>
+                            {row.statValue != null ? row.statValue.toFixed(0) : '—'} / {row.line != null ? formatHalfPointLine(row.line) : '—'}
+                          </span>
+                          <span>{row.direction}</span>
+                        </div>
+                        {(() => {
+                          const progress = playerProgressValue(row.statValue, row.line)
+                          return (
+                            <div className="parlay-leg-progress__track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                              <span className="parlay-leg-progress__threshold" />
+                              <span className="parlay-leg-progress__fill" style={{ width: `${progress}%` }} />
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>

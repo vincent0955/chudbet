@@ -1,7 +1,5 @@
 # Database schema
 
-This diagram matches the models under `backend/app/db/models/`
-
 ```mermaid
 erDiagram
     teams {
@@ -43,6 +41,26 @@ erDiagram
         integer id PK
         timestamptz created_at "NOT NULL, default now"
         bigint balance_cents "NOT NULL, default 0"
+        integer user_id FK "nullable, indexed, SET NULL on delete"
+    }
+
+    users {
+        integer id PK
+        varchar email "NOT NULL, UNIQUE, len 320"
+        varchar username "NOT NULL, UNIQUE, len 64"
+        varchar password_hash "NOT NULL, len 512"
+        boolean is_guest "NOT NULL, default false"
+        timestamptz created_at "NOT NULL, default now"
+    }
+
+    user_sessions {
+        integer id PK
+        integer user_id FK "NOT NULL, indexed, CASCADE delete"
+        varchar token_hash "NOT NULL, UNIQUE, indexed, len 128"
+        varchar user_agent "nullable, len 512"
+        timestamptz created_at "NOT NULL, default now"
+        timestamptz expires_at "NOT NULL, indexed"
+        timestamptz revoked_at "nullable"
     }
 
     ledger_entries {
@@ -92,6 +110,20 @@ erDiagram
         varchar direction "NOT NULL OVER|UNDER"
         float leg_probability "NOT NULL"
         integer sort_order "NOT NULL"
+        varchar outcome_status "NOT NULL pending|hit|miss|void default pending"
+    }
+
+    parlay_game_legs {
+        integer id PK
+        integer parlay_id FK "NOT NULL, indexed, CASCADE"
+        integer game_id FK "NOT NULL, indexed"
+        varchar market_type "NOT NULL moneyline|spread|total"
+        varchar selection "NOT NULL home|away|over|under"
+        float line "nullable"
+        integer odds_american "NOT NULL"
+        float leg_probability "NOT NULL"
+        integer sort_order "NOT NULL"
+        varchar outcome_status "NOT NULL pending|hit|miss|void default pending"
     }
 
     teams ||--o{ players : "has"
@@ -99,32 +131,19 @@ erDiagram
     teams ||--o{ games : "away_team"
     players ||--o{ player_game_stats : "stats"
     games ||--o{ player_game_stats : "stats"
+    users ||--o{ accounts : "owns_wallets"
+    users ||--o{ user_sessions : "has_sessions"
     accounts ||--o{ ledger_entries : "journal"
     accounts ||--o{ wagers : "places"
     wagers }|--|| parlays : "backs_snapshot"
     parlays ||--o{ parlay_legs : "has"
+    parlays ||--o{ parlay_game_legs : "has_game_legs"
     players ||--o{ parlay_legs : "leg_player"
     games ||--o{ parlay_legs : "optional_game"
+    games ||--o{ parlay_game_legs : "market_game"
 ```
 
 
 
-## Notes
 
-- `games` references `teams` twice: `home_team_id` and `away_team_id` are separate foreign keys to `teams.id`.
-- `player_game_stats` has btree indexes on `player_id` and `game_id`, and a **unique constraint** on `(player_id, game_id)`.
-- NBA identifiers (`nba_team_id`, `nba_player_id`, `nba_game_id`) support idempotent ingestion from `nba_api`.
-- `**parlays` / `parlay_legs`** are application-defined (not filled by NBA ingestion). Enum-like columns use **VARCHAR** (`native_enum=False`). Check constraints: `x_of_y` requires valid `k_required`; `standard` keeps `k_required` null.
-- `**p_hit`** is always **P(parlay hits)** (physical column name remains `**joint_probability`** in Postgres for older DBs). `**wager_on_hit**` selects for vs against; `**fair_decimal_odds**` is **1 / P(ticket wins)** (anti uses **1 − p_hit** for the ticket).
-- `parlay_legs.game_id` is optional so legs can target a player without a scheduled row yet.
-- Unique `(parlay_id, sort_order)` on `parlay_legs`.
-
-### Money (accounts / ledger / wagers)
-
-- `**accounts**` holds a cached `**balance_cents**` (bigint). Application code adjusts it **only** in the same DB transaction as an appended `**ledger_entries**` row; negative `**amount_cents**` are debits, positive credits.
-- `**ledger_entries.reference_type**` / `**reference_id**` link postings to domain rows (e.g. `**wager**` + wager id). Optional `**idempotency_key**` is globally **UNIQUE** for safe `**POST**` replay (especially deposits).
-- Composite index `**ix_ledger_entries_account_created**` on `**(account_id, created_at)**` supports recent-history queries by account.
-- `**wagers**` is the financed ticket at a **priced** payout multiple: `**offered_decimal_odds**` and `**potential_return_cents**` (typically `round(stake_cents × odds)`). Exactly **one wager per parlay** is enforced by `**uq_wagers_parlay_id**`; `**parlays` rows created via `POST /parlays` alone have no wager. `**ON DELETE RESTRICT**` on `**wagers**` → `**parlays**` avoids deleting math snapshots while money rows exist (settlement workflows should flip `**status**` instead of hard-deleting `**parlays**`).
-- `**Wager.status**` lifecycle `**open**` → `**won` / `lost` / `void` / `cancelled**` is reserved for grading/cashout logic; extra ledger types (`**wager_payout**`, `**wager_void**`, `**adjustment**`) exist for future settlement.
-- `**wagers.idempotency_key**` is optional and **UNIQUE** for idempotent wager placement (`**POST /accounts/{id}/wagers`**).
 

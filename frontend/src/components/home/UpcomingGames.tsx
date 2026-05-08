@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ApiError, getGameMarkets, getHealth, listGames, listTeams } from '../../api'
 import type { GameLegIn, GameMarketsRead, GameRead, TeamRead } from '../../api/types'
 import { useBetSlip } from '../../context/BetSlipContext'
+import { nbaTeamLogoUrl } from '../../lib/nbaMedia'
 import { parseAmericanOddsString } from '../../utils/parlayOdds'
 import { formatGameDate } from '../browse/format'
 
@@ -11,8 +12,12 @@ type LoadState =
   | { kind: 'ok'; games: GameRead[]; teams: TeamRead[] }
   | { kind: 'error'; message: string }
 
-function teamName(map: Map<number, string>, id: number): string {
-  return map.get(id) ?? `Team #${id}`
+function teamName(map: Map<number, TeamRead>, id: number): string {
+  return map.get(id)?.name ?? `Team #${id}`
+}
+
+function teamLogo(map: Map<number, TeamRead>, id: number): string | null {
+  return nbaTeamLogoUrl(map.get(id)?.nba_team_id)
 }
 
 function localTodayIso(): string {
@@ -123,15 +128,19 @@ function StackedOddsPill({ top, bottom }: { top: string; bottom: string }) {
 function GameOddsRow({
   game,
   teamLabel,
+  teamLogoUrl,
   gameHeader,
   markets,
   side,
+  showAt,
 }: {
   game: GameRead
   teamLabel: string
+  teamLogoUrl: string | null
   gameHeader: string
   markets: MarketTriple
   side: 'away' | 'home'
+  showAt?: boolean
 }) {
   const { addLeg, hasLeg, removeLegByLeg } = useBetSlip()
   const spreadLine = Number.parseFloat(markets.spread.line)
@@ -202,8 +211,20 @@ function GameOddsRow({
   const totalSelected = totalLeg ? hasLeg({ kind: 'game', leg: totalLeg }) : false
 
   return (
-    <div className="upcoming-game-bar__line">
-      <span className="upcoming-game-bar__team">{teamLabel}</span>
+    <div className={`upcoming-game-bar__line${showAt ? ' upcoming-game-bar__line--with-at' : ''}`}>
+      <span className="upcoming-game-bar__team">
+        {showAt ? <span className="upcoming-game-bar__at-inline">@</span> : null}
+        {teamLogoUrl && (
+          <img
+            className="upcoming-game-bar__team-logo"
+            src={teamLogoUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
+        )}
+        <span>{teamLabel}</span>
+      </span>
       <button
         type="button"
         className={`upcoming-game-bar__pill-btn${spreadSelected ? ' upcoming-game-bar__pill-btn--selected' : ''}`}
@@ -258,8 +279,8 @@ export function UpcomingGames() {
   }, [])
 
   const teamsMap = useMemo(() => {
-    if (state.kind !== 'ok') return new Map<number, string>()
-    return new Map(state.teams.map((t) => [t.id, t.name]))
+    if (state.kind !== 'ok') return new Map<number, TeamRead>()
+    return new Map(state.teams.map((t) => [t.id, t]))
   }, [state])
 
   const upcoming = useMemo(() => {
@@ -352,6 +373,8 @@ export function UpcomingGames() {
             {upcoming.map((g, i) => {
               const away = teamName(teamsMap, g.away_team_id)
               const home = teamName(teamsMap, g.home_team_id)
+              const awayLogo = teamLogo(teamsMap, g.away_team_id)
+              const homeLogo = teamLogo(teamsMap, g.home_team_id)
               const mkts = marketsByGameId[g.id] ?? placeholderMarkets(i)
               return (
                 <li key={g.id}>
@@ -368,6 +391,7 @@ export function UpcomingGames() {
                       <GameOddsRow
                         game={g}
                         teamLabel={away}
+                        teamLogoUrl={awayLogo}
                         gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${g.status}`}
                         markets={mkts.away}
                         side="away"
@@ -375,9 +399,11 @@ export function UpcomingGames() {
                       <GameOddsRow
                         game={g}
                         teamLabel={home}
+                        teamLogoUrl={homeLogo}
                         gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${g.status}`}
                         markets={mkts.home}
                         side="home"
+                        showAt
                       />
                     </div>
                   </Link>

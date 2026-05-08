@@ -58,6 +58,7 @@ class PlayerPropLinesRead(BaseModel):
     full_name: str
     team_id: int
     team_name: str
+    team_nba_id: int | None = None
     nba_player_id: int
     sample_size: int
     pts_line: float | None = None

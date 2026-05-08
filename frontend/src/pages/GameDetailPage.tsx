@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ApiError, getGamePropLines, listTeams } from '../api'
 import type { GamePropLinesBundle, TeamRead } from '../api/types'
 import { formatGameDate, formatTipOrGameStatusLabel } from '../components/browse/format'
+import { nbaTeamLogoUrl } from '../lib/nbaMedia'
 import { GamePropBoard } from '../components/game/GamePropBoard'
 
 function parseId(raw: string | undefined): number | null {
@@ -29,6 +30,10 @@ function InvalidGameId() {
 
 function teamLabel(map: Map<number, string>, id: number): string {
   return map.get(id) ?? `Team #${id}`
+}
+
+function teamLogo(map: Map<number, TeamRead>, id: number): string | null {
+  return nbaTeamLogoUrl(map.get(id)?.nba_team_id)
 }
 
 type LoadedState =
@@ -102,8 +107,11 @@ function GameDetailLoaded({ id }: { id: number }) {
   const { propLines, teams } = state
   const { game } = propLines
   const tmap = new Map(teams.map((t) => [t.id, t.name]))
+  const teamsById = new Map(teams.map((t) => [t.id, t]))
   const away = teamLabel(tmap, game.away_team_id)
   const home = teamLabel(tmap, game.home_team_id)
+  const awayLogo = teamLogo(teamsById, game.away_team_id)
+  const homeLogo = teamLogo(teamsById, game.home_team_id)
   const slipParts = [`${away} @ ${home}`, formatGameDate(game.game_date)]
   const tail = formatTipOrGameStatusLabel(game.game_time_utc, game.status)
   if (tail) slipParts.push(tail)
@@ -119,8 +127,10 @@ function GameDetailLoaded({ id }: { id: number }) {
       <section className="card game-detail__hero">
         <p className="game-detail__eyebrow muted">{formatGameDate(game.game_date)} · {game.status}</p>
         <h1 className="game-detail__title">
+          {awayLogo && <img className="game-detail__team-logo" src={awayLogo} alt="" loading="lazy" decoding="async" />}
           <span className="game-detail__away">{away}</span>
           <span className="game-detail__at muted"> @ </span>
+          {homeLogo && <img className="game-detail__team-logo" src={homeLogo} alt="" loading="lazy" decoding="async" />}
           <span className="game-detail__home">{home}</span>
         </h1>
       </section>

@@ -14,6 +14,7 @@ import { formatHalfPointLine } from '../components/browse/format'
 import { formatGameDate, formatTipOrGameStatusLabel } from '../components/browse/format'
 import { useWallet } from '../context/WalletContext'
 import { formatUsdFromCents } from '../lib/formatMoney'
+import { nbaPlayerHeadshotUrl, nbaTeamLogoUrl } from '../lib/nbaMedia'
 import { decimalToAmerican, formatAmericanOdds } from '../utils/parlayOdds'
 
 function statusLabel(s: WagerStatus): string {
@@ -109,24 +110,50 @@ function formatGameLeg(leg: ParlayGameLegRead): string {
   const odds = `${leg.odds_american >= 0 ? '+' : ''}${leg.odds_american}`
   if (leg.market_type === 'moneyline') {
     const team = leg.selection === 'home' ? homeTeam : awayTeam
-    return `${team} MONEYLINE (${odds})`
+    return `${team} · MONEYLINE (${odds})`
   }
   if (leg.market_type === 'spread') {
     const team = leg.selection === 'home' ? homeTeam : awayTeam
     const line = leg.line ?? 0
-    return `${team} SPREAD ${line >= 0 ? '+' : ''}${line.toFixed(1)} (${odds})`
+    return `${team} · SPREAD ${line >= 0 ? '+' : ''}${line.toFixed(1)} (${odds})`
   }
   const side = leg.selection === 'over' ? 'OVER' : 'UNDER'
-  return `${game} TOTAL ${side} ${(leg.line ?? 0).toFixed(1)} (${odds})`
+  return `${game} · TOTAL ${side} ${(leg.line ?? 0).toFixed(1)} (${odds})`
 }
 
-type GroupedRow = { key: string; text: string; outcome?: ParlayLegOutcome | null }
+type GroupedRow = {
+  key: string
+  text: string
+  outcome?: ParlayLegOutcome | null
+  kind: 'player' | 'game'
+  direction?: 'OVER' | 'UNDER'
+  line?: number
+  statValue?: number | null
+  playerImageUrl?: string | null
+  playerTeamLogoUrl?: string | null
+}
 
-type GroupedGame = { game: string; meta: string; rows: GroupedRow[] }
+type GroupedGame = { game: string; meta: string; scoreLabel?: string; scoreIsFinal?: boolean; rows: GroupedRow[] }
+
+const PROGRESS_THRESHOLD_PCT = 80
+
+function isFinalStatus(status: string | null | undefined): boolean {
+  return (status ?? '').toLowerCase().includes('final')
+}
+
+function playerProgressValue(currentValue: number | null | undefined, line: number | undefined): number {
+  if (currentValue == null || line == null || line <= 0) return 0
+  const ratio = currentValue / line
+  if (ratio <= 1) return Math.max(0, Math.min(PROGRESS_THRESHOLD_PCT, ratio * PROGRESS_THRESHOLD_PCT))
+  const overflowPct = (ratio - 1) * (100 - PROGRESS_THRESHOLD_PCT)
+  return Math.max(PROGRESS_THRESHOLD_PCT, Math.min(100, PROGRESS_THRESHOLD_PCT + overflowPct))
+}
 
 function groupedLegs(detail: WagerDetailResponse): GroupedGame[] {
   const map = new Map<string, GroupedRow[]>()
   const metaByGame = new Map<string, string>()
+  const scoreByGame = new Map<string, string | undefined>()
+  const finalByGame = new Map<string, boolean>()
   const order: string[] = []
   const push = (
     game: string,
@@ -138,6 +165,7 @@ function groupedLegs(detail: WagerDetailResponse): GroupedGame[] {
     if (!map.has(game)) {
       map.set(game, [])
       order.push(game)
+      finalByGame.set(game, false)
       if (gameDate) {
         const tail = formatTipOrGameStatusLabel(gameTimeUtc, gameStatus)
         metaByGame.set(game, tail ? `${formatGameDate(gameDate)} · ${tail}` : formatGameDate(gameDate))
@@ -145,23 +173,47 @@ function groupedLegs(detail: WagerDetailResponse): GroupedGame[] {
         metaByGame.set(game, '')
       }
     }
+    if (isFinalStatus(gameStatus)) {
+      finalByGame.set(game, true)
+    }
     map.get(game)!.push(row)
   }
   for (const leg of [...detail.parlay.legs].sort((a, b) => a.sort_order - b.sort_order)) {
-    push(leg.game_label || 'No specific game', {
+    const groupKey = leg.game_label || 'No specific game'
+    if (!scoreByGame.has(groupKey) && leg.game_home_score != null && leg.game_away_score != null) {
+      scoreByGame.set(groupKey, `${leg.game_away_score} - ${leg.game_home_score}`)
+    }
+    push(groupKey, {
       key: `player-${leg.id}`,
       text: formatPlayerLeg(leg),
       outcome: leg.outcome,
+      kind: 'player',
+      direction: leg.direction,
+      line: leg.line,
+      statValue: leg.stat_value,
+      playerImageUrl: nbaPlayerHeadshotUrl(leg.player_nba_id),
+      playerTeamLogoUrl: nbaTeamLogoUrl(leg.player_team_nba_id),
     }, leg.game_date, leg.game_time_utc, leg.game_status)
   }
   for (const leg of [...(detail.parlay.game_legs ?? [])].sort((a, b) => a.sort_order - b.sort_order)) {
-    push(leg.game_label || `Game #${leg.game_id}`, {
+    const groupKey = leg.game_label || `Game #${leg.game_id}`
+    if (!scoreByGame.has(groupKey) && leg.home_score != null && leg.away_score != null) {
+      scoreByGame.set(groupKey, `${leg.away_score} - ${leg.home_score}`)
+    }
+    push(groupKey, {
       key: `game-${leg.id}`,
       text: formatGameLeg(leg),
       outcome: leg.outcome,
+      kind: 'game',
     }, leg.game_date, leg.game_time_utc, leg.game_status)
   }
-  return order.map((game) => ({ game, meta: metaByGame.get(game) ?? '', rows: map.get(game)! }))
+  return order.map((game) => ({
+    game,
+    meta: metaByGame.get(game) ?? '',
+    scoreLabel: scoreByGame.get(game),
+    scoreIsFinal: finalByGame.get(game) ?? false,
+    rows: map.get(game)!,
+  }))
 }
 
 function parlayModeLabel(detail: WagerDetailResponse | undefined): string | null {
@@ -315,13 +367,50 @@ export function MyBetsPage() {
                         <div key={`${w.id}-${g.game}`}>
                           <h3 className="my-bets__game-head">
                             <span>{g.game}</span>
-                            <span className="my-bets__game-head-meta">{g.meta}</span>
+                            <span className="my-bets__game-head-right">
+                              {g.scoreLabel ? (
+                                <span className="my-bets__game-head-score-wrap">
+                                  {g.scoreIsFinal ? <span className="my-bets__game-head-final">FINAL</span> : null}
+                                  <span className="my-bets__game-head-score">{g.scoreLabel}</span>
+                                </span>
+                              ) : null}
+                              <span className="my-bets__game-head-meta">{g.meta}</span>
+                            </span>
                           </h3>
                           <ul className="my-bets__leg-list">
                             {g.rows.map((row) => (
                               <li key={row.key} className="my-bets__leg-row">
                                 <LegOutcomeIcon outcome={row.outcome} />
-                                <span>{row.text}</span>
+                                {row.playerImageUrl ? (
+                                  <span className="my-bets__leg-player-image-wrap">
+                                    <img src={row.playerImageUrl} alt="" className="my-bets__leg-player-image" loading="lazy" />
+                                    {row.playerTeamLogoUrl ? (
+                                      <img src={row.playerTeamLogoUrl} alt="" className="my-bets__leg-player-team-badge" loading="lazy" />
+                                    ) : null}
+                                  </span>
+                                ) : null}
+                                <div className="my-bets__leg-body">
+                                  <span>{row.text}</span>
+                                  {row.kind === 'player' ? (
+                                    <div className="my-bets__leg-progress">
+                                      <div className="my-bets__leg-progress-meta">
+                                        <span>
+                                          {row.statValue != null ? row.statValue.toFixed(0) : '—'} / {row.line != null ? formatHalfPointLine(row.line) : '—'}
+                                        </span>
+                                        <span>{row.direction}</span>
+                                      </div>
+                                      {(() => {
+                                        const progress = playerProgressValue(row.statValue, row.line)
+                                        return (
+                                          <div className="my-bets__leg-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                                            <span className="my-bets__leg-progress-threshold" />
+                                            <span className="my-bets__leg-progress-fill" style={{ width: `${progress}%` }} />
+                                          </div>
+                                        )
+                                      })()}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </li>
                             ))}
                           </ul>

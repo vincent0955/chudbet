@@ -47,6 +47,7 @@ export interface PlayerPropLinesRead {
   full_name: string
   team_id: number
   team_name: string
+  team_nba_id: number | null
   nba_player_id: number
   sample_size: number
   pts_line: number | null
@@ -130,6 +131,8 @@ export interface ParlayCreate {
 export interface ParlayLegRead {
   id: number
   player_id: number
+  player_nba_id?: number | null
+  player_team_nba_id?: number | null
   game_id: number | null
   stat_type: StatType
   line: number
@@ -139,9 +142,14 @@ export interface ParlayLegRead {
   outcome?: ParlayLegOutcome | null
   player_full_name?: string | null
   game_label?: string | null
+  game_home_team_name?: string | null
+  game_away_team_name?: string | null
+  game_home_score?: number | null
+  game_away_score?: number | null
   game_date?: ISODateString | null
   game_time_utc?: string | null
   game_status?: string | null
+  stat_value?: number | null
 }
 
 export interface ParlayRead {
@@ -175,6 +183,10 @@ export interface ParlayGameLegRead {
   game_label?: string | null
   home_team_name?: string | null
   away_team_name?: string | null
+  home_team_nba_id?: number | null
+  away_team_nba_id?: number | null
+  home_score?: number | null
+  away_score?: number | null
   game_date?: ISODateString | null
   game_time_utc?: string | null
   game_status?: string | null

@@ -1,6 +1,7 @@
 import type { GamePropLinesBundle, PlayerPropLinesRead, StatType } from '../../api/types'
 import { parseAmericanOddsString } from '../../utils/parlayOdds'
 import { useBetSlip } from '../../context/BetSlipContext'
+import { nbaPlayerHeadshotUrl, nbaTeamLogoUrl } from '../../lib/nbaMedia'
 import { formatHalfPointLine } from '../browse/format'
 
 type Props = {
@@ -176,6 +177,26 @@ export function GamePropBoard({ bundle, slipGameHeader }: Props) {
                 return (
                   <li key={`${stat}-${player.id}`} className="game-props__row">
                     <div className="game-props__player">
+                      {nbaPlayerHeadshotUrl(player.nba_player_id) && (
+                        <span className="game-props__headshot-wrap">
+                          <img
+                            className="game-props__headshot"
+                            src={nbaPlayerHeadshotUrl(player.nba_player_id) ?? ''}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                          />
+                          {nbaTeamLogoUrl(player.team_nba_id) && (
+                            <img
+                              className="game-props__headshot-team-badge"
+                              src={nbaTeamLogoUrl(player.team_nba_id) ?? ''}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          )}
+                        </span>
+                      )}
                       <span className="game-props__name">{player.full_name}</span>
                       <span className="game-props__team muted">{player.team_name}</span>
                     </div>

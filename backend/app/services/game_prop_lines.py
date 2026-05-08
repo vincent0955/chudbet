@@ -90,13 +90,13 @@ def _american_odds_pair_from_history(values: list[int], line: float | None) -> t
 
 def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle:
     roster_rows = db.execute(
-        select(Player, Team.name)
+        select(Player, Team.name, Team.nba_team_id)
         .join(Team, Player.team_id == Team.id)
         .where(Player.team_id.in_((game.home_team_id, game.away_team_id)))
         .order_by(Player.team_id.asc(), Player.full_name.asc())
     ).all()
 
-    player_ids = [p.id for p, _ in roster_rows]
+    player_ids = [p.id for p, _, _ in roster_rows]
     by_player: dict[int, list[PlayerGameStat]] = defaultdict(list)
 
     if player_ids:
@@ -117,7 +117,7 @@ def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle
             bucket.append(stat)
 
     players_build: list[PlayerPropLinesRead] = []
-    for player, team_name in roster_rows:
+    for player, team_name, team_nba_id in roster_rows:
         samples = by_player.get(player.id, [])
         n = len(samples)
         pts_vals = [s.points for s in samples]
@@ -137,6 +137,7 @@ def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle
                 full_name=player.full_name,
                 team_id=player.team_id,
                 team_name=team_name,
+                team_nba_id=team_nba_id,
                 nba_player_id=player.nba_player_id,
                 sample_size=n,
                 pts_line=pts_line,

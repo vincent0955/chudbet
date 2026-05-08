@@ -80,6 +80,8 @@ class ParlayLegRead(BaseModel):
 
     id: int
     player_id: int
+    player_nba_id: int | None = None
+    player_team_nba_id: int | None = None
     game_id: int | None
     stat_type: StatType
     line: float
@@ -95,9 +97,14 @@ class ParlayLegRead(BaseModel):
         description="Set when Player relationship is loaded for display.",
     )
     game_label: str | None = None
+    game_home_team_name: str | None = None
+    game_away_team_name: str | None = None
+    game_home_score: int | None = None
+    game_away_score: int | None = None
     game_date: date | None = None
     game_time_utc: datetime | None = None
     game_status: str | None = None
+    stat_value: float | None = None
 
 
 class ParlayGameLegRead(BaseModel):
@@ -115,6 +122,10 @@ class ParlayGameLegRead(BaseModel):
     game_label: str | None = None
     home_team_name: str | None = None
     away_team_name: str | None = None
+    home_team_nba_id: int | None = None
+    away_team_nba_id: int | None = None
+    home_score: int | None = None
+    away_score: int | None = None
     game_date: date | None = None
     game_time_utc: datetime | None = None
     game_status: str | None = None
