@@ -1,6 +1,6 @@
 # ChudBet
 
-ChutBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet on only a certain amount of legs hitting.
+ChudBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet on only a certain amount of legs hitting.
 
 ## Local Setup
 **Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Compose, and [Node.js](https://nodejs.org/) 20+ for the frontend.
@@ -22,10 +22,6 @@ ChutBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet
    ```
 
    Open the URL Vite prints (usually [http://localhost:5173](http://localhost:5173)).
-
-Optional: copy `frontend/.env.example` to `frontend/.env.local` if you need to change `VITE_API_URL` or `VITE_ACCOUNT_ID`.
-
-Default Postgres credentials when using Compose are user `chudbet`, password `chudbet`, database `chudbet` (override with `POSTGRES_*` in your environment if you like).
 
 ## Screenshots
 
