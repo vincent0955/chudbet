@@ -737,13 +737,22 @@ def ingest_box_score_for_game(session: Session, game: Game) -> int:
     source = "none"
     slots_trad = 0
     slots_live = 0
+    live_payload: dict | None = None
 
     if api_slots > 0:
         slots_trad, applied = _apply_players_from_traditional_bt(session, game, bt)
         if applied > 0:
             source = "traditional_json"
 
-    if applied == 0:
+    # Even when traditional player rows exist, team score can be stale/missing (e.g. 0-0 in Q2).
+    # In that case, refresh score from CDN liveData as a secondary source.
+    score_looks_stale = (
+        game.home_score is None
+        or game.away_score is None
+        or (game.home_score == 0 and game.away_score == 0)
+    )
+    should_try_live = applied == 0 or (score_looks_stale and not _is_final_status_text(game.status))
+    if should_try_live:
         live_payload = _fetch_cdn_live_boxscore_game_dict(gid)
         if live_payload:
             gst = live_payload.get("gameStatusText")
@@ -751,7 +760,7 @@ def ingest_box_score_for_game(session: Session, game: Game) -> int:
                 game.status = str(gst).strip()[:64]
             _apply_scores_from_cdn_live_game(game, live_payload)
             slots_live, applied_live = _apply_players_from_cdn_live_game(session, game, live_payload)
-            if applied_live > 0:
+            if applied == 0 and applied_live > 0:
                 applied = applied_live
                 source = "cdn_live"
 
