@@ -40,6 +40,7 @@ def run_ingest_job() -> None:
 
     season = os.getenv("NBA_SEASON", "2025-26")
     scoreboard_days = _int_env("WORKER_SCOREBOARD_DAYS", 3)
+    scoreboard_past_days = _int_env("WORKER_SCOREBOARD_PAST_DAYS", 0)
     max_games_raw = os.getenv("WORKER_MAX_GAMES", "").strip()
     max_games = int(max_games_raw) if max_games_raw.isdigit() else None
 
@@ -51,6 +52,7 @@ def run_ingest_job() -> None:
             max_games=max_games,
             recent_first=_truthy("WORKER_RECENT_FIRST", "true"),
             scoreboard_days=scoreboard_days,
+            scoreboard_past_days=scoreboard_past_days,
             skip_rosters=_truthy("WORKER_SKIP_ROSTERS", "true"),
             skip_games=_truthy("WORKER_SKIP_GAMES", "true"),
             skip_stats=False,

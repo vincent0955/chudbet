@@ -113,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             max_games=args.max_games,
             recent_first=args.recent_first,
             scoreboard_days=args.scoreboard_days,
+            scoreboard_past_days=0,
             skip_rosters=args.skip_rosters,
             skip_games=args.skip_games,
             skip_stats=args.skip_stats,

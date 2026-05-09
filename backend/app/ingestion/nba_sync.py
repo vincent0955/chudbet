@@ -467,19 +467,28 @@ def sync_games_from_finder(
     return games_by_nba_id, order
 
 
-def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], *, days: int) -> list[Game]:
-    """Upsert games from Stats ``ScoreboardV3`` for ``days`` consecutive NBA Eastern calendar days starting today.
+def sync_games_from_scoreboard(
+    session: Session,
+    teams_by_nba: dict[int, Team],
+    *,
+    days: int,
+    past_days: int = 0,
+) -> list[Game]:
+    """Upsert games from Stats ``ScoreboardV3`` for a small window around today.
 
     Covers same-day and upcoming games that ``LeagueGameFinder`` may omit or lag on.
     Team line rows list **home first**, **away second** (validated against ``gameCode``).
     """
     if days < 1:
         raise ValueError("days must be >= 1")
+    if past_days < 0:
+        raise ValueError("past_days must be >= 0")
 
     today = datetime.now(NBA_CALENDAR_TZ).date()
     touched: list[Game] = []
 
-    for offset in range(days):
+    # Window: yesterday(s) + today + next N days
+    for offset in range(-past_days, days):
         slate = today + timedelta(days=offset)
         date_str = slate.isoformat()
         _pause()
@@ -569,8 +578,9 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
 
     session.flush()
     logger.info(
-        "Scoreboard sync processed %d game row touch(es) over %d Eastern day(s)",
+        "Scoreboard sync processed %d game row touch(es) over past_days=%d next_days=%d",
         len(touched),
+        past_days,
         days,
     )
     return touched
@@ -812,6 +822,7 @@ def run_full_ingest(
     max_games: int | None,
     recent_first: bool,
     scoreboard_days: int | None,
+    scoreboard_past_days: int = 0,
     skip_rosters: bool,
     skip_games: bool,
     skip_stats: bool,
@@ -839,7 +850,12 @@ def run_full_ingest(
 
     scoreboard_games: list[Game] = []
     if scoreboard_days is not None and scoreboard_days > 0:
-        scoreboard_games = sync_games_from_scoreboard(session, teams_by_nba, days=scoreboard_days)
+        scoreboard_games = sync_games_from_scoreboard(
+            session,
+            teams_by_nba,
+            days=scoreboard_days,
+            past_days=scoreboard_past_days,
+        )
         session.commit()
 
     if skip_stats:
