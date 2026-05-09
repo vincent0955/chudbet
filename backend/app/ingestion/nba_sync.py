@@ -40,6 +40,13 @@ def _pause() -> None:
     time.sleep(REQUEST_PAUSE_SEC)
 
 
+def _is_final_status_text(status: str | None) -> bool:
+    if not status:
+        return False
+    s = status.strip().lower()
+    return ("final" in s) or s.startswith("f/") or s.startswith("f ")
+
+
 def sync_teams(session: Session) -> dict[int, Team]:
     """Upsert all NBA teams from static data. Returns map nba_team_id -> Team."""
     rows = static_teams.get_teams()
@@ -222,10 +229,22 @@ def _apply_scores_from_cdn_live_game(game: Game, game_payload: dict) -> None:
     away = game_payload.get("awayTeam") or {}
     home = game_payload.get("homeTeam") or {}
     try:
-        if away.get("score") is not None:
-            game.away_score = int(away["score"])
-        if home.get("score") is not None:
-            game.home_score = int(home["score"])
+        away_raw = away.get("score")
+        home_raw = home.get("score")
+        if away_raw is None and home_raw is None:
+            return
+        away_new = int(away_raw) if away_raw is not None else None
+        home_new = int(home_raw) if home_raw is not None else None
+        if _is_final_status_text(game.status):
+            if away_new is not None:
+                game.away_score = away_new
+            if home_new is not None:
+                game.home_score = home_new
+            return
+        if away_new is not None:
+            game.away_score = away_new if game.away_score is None else max(game.away_score, away_new)
+        if home_new is not None:
+            game.home_score = home_new if game.home_score is None else max(game.home_score, home_new)
     except (TypeError, ValueError):
         pass
 
@@ -537,8 +556,14 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
                 existing.status = status_txt[:64]
                 if tip_utc is not None:
                     existing.game_time_utc = tip_utc
-                existing.home_score = home_score
-                existing.away_score = away_score
+                if _is_final_status_text(status_txt):
+                    existing.home_score = home_score
+                    existing.away_score = away_score
+                else:
+                    if home_score is not None:
+                        existing.home_score = home_score if existing.home_score is None else max(existing.home_score, home_score)
+                    if away_score is not None:
+                        existing.away_score = away_score if existing.away_score is None else max(existing.away_score, away_score)
 
             touched.append(existing)
 
@@ -663,10 +688,17 @@ def _apply_player_stat_row(
         )
         session.add(row)
     else:
-        row.points = pts
-        row.rebounds = reb
-        row.assists = ast
-        row.minutes = mins
+        if _is_final_status_text(game.status):
+            row.points = pts
+            row.rebounds = reb
+            row.assists = ast
+            row.minutes = mins
+        else:
+            # Live feeds can briefly drop/omit per-player stats; avoid regressing totals mid-game.
+            row.points = max(row.points, pts)
+            row.rebounds = max(row.rebounds, reb)
+            row.assists = max(row.assists, ast)
+            row.minutes = max(row.minutes, mins)
     return 1
 
 
