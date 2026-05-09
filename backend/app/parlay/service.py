@@ -18,6 +18,7 @@ from app.parlay.math import (
     leg_win_probability,
     sample_mean_std,
 )
+from app.services.game_wager_gate import require_pre_game_game_for_wager
 
 
 def _stat_column(stat: StatType):
@@ -66,6 +67,7 @@ def create_parlay(session: Session, body: ParlayCreate) -> Parlay:
             game = session.get(Game, leg.game_id)
             if game is None:
                 raise ValueError(f"game_id {leg.game_id} not found")
+            require_pre_game_game_for_wager(game)
 
         series = fetch_stat_series(session, leg.player_id, leg.stat_type, body.lookback_games)
         if len(series) < 2:
@@ -88,6 +90,7 @@ def create_parlay(session: Session, body: ParlayCreate) -> Parlay:
         game = session.get(Game, leg.game_id)
         if game is None:
             raise ValueError(f"game_id {leg.game_id} not found")
+        require_pre_game_game_for_wager(game)
         game_leg_probs.append(_prob_from_american(leg.odds_american))
 
     rng = random.Random(body.rng_seed)

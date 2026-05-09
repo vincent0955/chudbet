@@ -234,13 +234,16 @@ export function MyBetsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (accountId == null) {
       setRows(null)
       return
     }
-    setLoading(true)
-    setError(null)
+    const silent = opts?.silent === true
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+    }
     try {
       const data = await listWagers(accountId, { limit: 200 })
       setRows(data)
@@ -260,12 +263,15 @@ export function MyBetsPage() {
         nextDetails[pair[0]] = pair[1]
       }
       setDetailsByWager(nextDetails)
+      if (silent) setError(null)
     } catch (e) {
-      if (e instanceof ApiError) setError(e.message)
-      else setError(e instanceof Error ? e.message : 'Failed to load bets.')
-      setRows(null)
+      if (!silent) {
+        if (e instanceof ApiError) setError(e.message)
+        else setError(e instanceof Error ? e.message : 'Failed to load bets.')
+        setRows(null)
+      }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [accountId])
 
@@ -274,6 +280,15 @@ export function MyBetsPage() {
       void load()
     })
   }, [load])
+
+  /** Open bets: refresh periodically so team scores + player stat bars track worker/box-score updates. */
+  useEffect(() => {
+    if (tab !== 'open' || accountId == null) return
+    const id = window.setInterval(() => {
+      void load({ silent: true })
+    }, 45_000)
+    return () => window.clearInterval(id)
+  }, [tab, accountId, load])
 
   const filtered = useMemo(() => {
     if (!rows) return []

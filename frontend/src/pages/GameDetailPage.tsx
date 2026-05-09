@@ -5,6 +5,7 @@ import type { GamePropLinesBundle, TeamRead } from '../api/types'
 import { formatGameDate, formatTipOrGameStatusLabel } from '../components/browse/format'
 import { nbaTeamLogoUrl } from '../lib/nbaMedia'
 import { GamePropBoard } from '../components/game/GamePropBoard'
+import { statusIndicatesLiveOrFinished } from '../lib/gameWagerGate'
 
 function parseId(raw: string | undefined): number | null {
   if (!raw) return null
@@ -115,6 +116,7 @@ function GameDetailLoaded({ id }: { id: number }) {
   const slipParts = [`${away} @ ${home}`, formatGameDate(game.game_date)]
   const tail = formatTipOrGameStatusLabel(game.game_time_utc, game.status)
   if (tail) slipParts.push(tail)
+  const wageringLocked = statusIndicatesLiveOrFinished(game.status)
 
   return (
     <div className="page page--browse page--game-detail">
@@ -135,7 +137,11 @@ function GameDetailLoaded({ id }: { id: number }) {
         </h1>
       </section>
 
-      <GamePropBoard bundle={propLines} slipGameHeader={slipParts.join(' · ')} />
+      <GamePropBoard
+        bundle={propLines}
+        slipGameHeader={slipParts.join(' · ')}
+        wageringLocked={wageringLocked}
+      />
     </div>
   )
 }

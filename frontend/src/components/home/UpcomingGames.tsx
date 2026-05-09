@@ -6,6 +6,7 @@ import { useBetSlip } from '../../context/BetSlipContext'
 import { nbaTeamLogoUrl } from '../../lib/nbaMedia'
 import { parseAmericanOddsString } from '../../utils/parlayOdds'
 import { formatGameDate } from '../browse/format'
+import { statusIndicatesLiveOrFinished } from '../../lib/gameWagerGate'
 
 type LoadState =
   | { kind: 'loading' }
@@ -28,16 +29,6 @@ function localTodayIso(): string {
   return `${y}-${m}-${day}`
 }
 
-function isLiveOrClosedStatus(statusRaw: string | null | undefined): boolean {
-  const s = String(statusRaw ?? '').trim().toUpperCase()
-  if (!s) return false
-  if (s.includes('FINAL') || s.includes('POSTPONED') || s.includes('CANCELLED')) return true
-  if (s.includes('HALFTIME') || s.includes('END OF')) return true
-  if (/^Q[1-4]\b/.test(s) || /^OT\b/.test(s)) return true
-  if (/^\d{1,2}:\d{2}\b/.test(s) && !s.includes('AM') && !s.includes('PM') && !s.includes('ET')) return true
-  return false
-}
-
 /** NBA slate rows with no tip-off yet (TBD status and/or missing UTC tip). */
 function hasUnsetTipOrTbdStatus(game: GameRead, todayIso: string): boolean {
   const st = String(game.status ?? '').trim().toUpperCase()
@@ -53,7 +44,7 @@ function isBettableUpcomingGame(game: GameRead, todayIso: string): boolean {
   if (hasUnsetTipOrTbdStatus(game, todayIso)) return false
   if (game.game_date > todayIso) return true
   if (game.game_date < todayIso) return false
-  return !isLiveOrClosedStatus(game.status)
+  return !statusIndicatesLiveOrFinished(game.status)
 }
 
 type SpreadParts = { line: string; odds: string }

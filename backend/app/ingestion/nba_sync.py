@@ -7,6 +7,7 @@ the application when users build parlays.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -20,6 +21,8 @@ from nba_api.stats.endpoints import (
     leaguegamefinder,
     scoreboardv3,
 )
+from nba_api.live.nba.endpoints.boxscore import BoxScore
+from nba_api.stats.library.http import NBAStatsHTTP
 from nba_api.stats.static import teams as static_teams
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -165,6 +168,211 @@ def _parse_score(raw: object) -> int | None:
         return None
 
 
+def normalize_nba_game_id_str(raw: object) -> str:
+    """Normalize NBA Stats ``GameID`` to a 10-digit string (zero-padded)."""
+    if raw is None:
+        return ""
+    if isinstance(raw, float) and math.isnan(raw):
+        return ""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        try:
+            if isinstance(raw, float) and math.isnan(raw):
+                return ""
+            raw = int(raw)
+        except (ValueError, OverflowError):
+            pass
+    s = str(raw).strip()
+    if s.endswith(".0") and s[:-2].isdigit():
+        s = s[:-2]
+    if not s:
+        return ""
+    if not s.isdigit():
+        return s
+    return s.zfill(10)
+
+
+def _safe_nba_person_id(raw: object) -> int | None:
+    if raw is None:
+        return None
+    if isinstance(raw, float) and math.isnan(raw):
+        return None
+    try:
+        v = int(float(raw))
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def _fetch_cdn_live_boxscore_game_dict(game_id: str) -> dict | None:
+    """Fetch ``cdn.nba.com/static/json/liveData/boxscore/...`` (player rows during live playoffs).
+
+    Stats ``boxscoretraditionalv3`` frequently returns empty ``players`` for in-progress games while
+    team scores still update via scoreboard; liveData matches what NBA.com uses in-game.
+    """
+    _pause()
+    try:
+        bs = BoxScore(game_id=game_id, timeout=60)
+        return (bs.nba_response.get_dict() or {}).get("game") or {}
+    except Exception as exc:
+        logger.warning("CDN live boxscore fetch failed for %s: %s", game_id, exc)
+        return None
+
+
+def _apply_scores_from_cdn_live_game(game: Game, game_payload: dict) -> None:
+    away = game_payload.get("awayTeam") or {}
+    home = game_payload.get("homeTeam") or {}
+    try:
+        if away.get("score") is not None:
+            game.away_score = int(away["score"])
+        if home.get("score") is not None:
+            game.home_score = int(home["score"])
+    except (TypeError, ValueError):
+        pass
+
+
+def _apply_players_from_cdn_live_game(session: Session, game: Game, game_payload: dict) -> tuple[int, int]:
+    """Upsert stats from CDN liveData boxscore. Returns ``(slots_in_payload, db_rows_written)``."""
+    slots = 0
+    applied = 0
+    for side in ("homeTeam", "awayTeam"):
+        team = game_payload.get(side) or {}
+        for player in team.get("players") or []:
+            pid = _safe_nba_person_id(player.get("personId"))
+            if pid is None:
+                continue
+            stats = player.get("statistics") or {}
+            slots += 1
+            pts = normalize_stat_int(stats.get("points"))
+            reb = normalize_stat_int(stats.get("reboundsTotal"))
+            ast = normalize_stat_int(stats.get("assists"))
+            mins = parse_minutes(stats.get("minutes"))
+            applied += _apply_player_stat_row(session, game, pid, pts, reb, ast, mins)
+    return slots, applied
+
+
+def _fetch_boxscore_traditional_v3_raw_dict(game_id: str) -> dict | None:
+    """Fetch ``boxscoretraditionalv3`` JSON without nba_api's parser (avoids crashes when team ``statistics`` is null)."""
+    _pause()
+    try:
+        http = NBAStatsHTTP()
+        resp = http.send_api_request(
+            endpoint="boxscoretraditionalv3",
+            parameters={
+                "GameID": game_id,
+                "EndPeriod": "0",
+                "EndRange": "0",
+                "RangeType": "0",
+                "StartPeriod": "0",
+                "StartRange": "0",
+            },
+            timeout=60,
+        )
+        return resp.get_dict()
+    except Exception as exc:
+        logger.warning("Raw boxscoretraditionalv3 HTTP failed for %s: %s", game_id, exc)
+        return None
+
+
+def _team_points_from_traditional_bt(bt: dict) -> dict[int, int] | None:
+    """Team totals from ``boxScoreTraditional``; falls back to summing player points when team statistics are null."""
+    out: dict[int, int] = {}
+    for side in ("homeTeam", "awayTeam"):
+        team = bt.get(side) or {}
+        tid = team.get("teamId")
+        if tid is None:
+            continue
+        stats = team.get("statistics") or {}
+        pts = stats.get("points")
+        if pts is not None:
+            try:
+                out[int(tid)] = normalize_stat_int(pts)
+            except Exception:
+                pass
+    if len(out) >= 2:
+        return out
+
+    sums: dict[int, int] = {}
+    for side in ("homeTeam", "awayTeam"):
+        team = bt.get(side) or {}
+        tid = team.get("teamId")
+        if tid is None:
+            continue
+        total = 0
+        for player in team.get("players") or []:
+            st = player.get("statistics") or {}
+            total += normalize_stat_int(st.get("points"))
+        if total > 0:
+            sums[int(tid)] = total
+    return sums if len(sums) >= 2 else None
+
+
+def _count_traditional_player_rows(bt: dict) -> int:
+    return sum(
+        len((bt.get(side) or {}).get("players") or [])
+        for side in ("homeTeam", "awayTeam")
+    )
+
+
+def _apply_players_from_traditional_bt(session: Session, game: Game, bt: dict) -> tuple[int, int]:
+    """Upsert player stats from ``boxScoreTraditional`` JSON.
+
+    Returns ``(slots_seen_in_api, rows_written_or_updated_in_db)``.
+    """
+    slots = 0
+    applied = 0
+    for side in ("homeTeam", "awayTeam"):
+        team = bt.get(side) or {}
+        for player in team.get("players") or []:
+            pid = _safe_nba_person_id(player.get("personId"))
+            if pid is None:
+                continue
+            slots += 1
+            stats = player.get("statistics") or {}
+            pts = normalize_stat_int(stats.get("points"))
+            reb = normalize_stat_int(stats.get("reboundsTotal"))
+            ast = normalize_stat_int(stats.get("assists"))
+            mins = parse_minutes(stats.get("minutes"))
+            applied += _apply_player_stat_row(session, game, pid, pts, reb, ast, mins)
+    return slots, applied
+
+
+def _apply_players_from_traditional_dataframes(session: Session, game: Game, gid: str) -> tuple[int, int]:
+    """Fallback: nba_api pandas frames (legacy / odd responses).
+
+    Returns ``(slots_seen_in_api, rows_written_or_updated_in_db)``.
+    """
+    df = _box_score_rows_v3(gid)
+    if df is None:
+        df = _box_score_rows_v2(gid)
+    if df is None or df.empty:
+        return 0, 0
+    slots = 0
+    applied = 0
+    if "personId" in df.columns:
+        for _, r in df.iterrows():
+            pid = _safe_nba_person_id(r.get("personId"))
+            if pid is None:
+                continue
+            slots += 1
+            pts = normalize_stat_int(r.get("points"))
+            reb = normalize_stat_int(r.get("reboundsTotal"))
+            ast = normalize_stat_int(r.get("assists"))
+            mins = parse_minutes(r.get("minutes"))
+            applied += _apply_player_stat_row(session, game, pid, pts, reb, ast, mins)
+    else:
+        for _, r in df.iterrows():
+            pid = _safe_nba_person_id(r.get("PLAYER_ID"))
+            if pid is None:
+                continue
+            slots += 1
+            pts = normalize_stat_int(r.get("PTS"))
+            reb = normalize_stat_int(r.get("REB"))
+            ast = normalize_stat_int(r.get("AST"))
+            mins = parse_minutes(r.get("MIN"))
+            applied += _apply_player_stat_row(session, game, pid, pts, reb, ast, mins)
+    return slots, applied
+
+
 def sync_games_from_finder(
     session: Session,
     season: str,
@@ -184,7 +392,7 @@ def sync_games_from_finder(
     (same order as the filtered ``game_ids`` list, minus any skipped games).
     """
     df = load_season_game_rows(season, regular_only)
-    df["GAME_ID"] = df["GAME_ID"].astype(str)
+    df["GAME_ID"] = df["GAME_ID"].map(normalize_nba_game_id_str)
     all_ids = sorted(df["GAME_ID"].unique().tolist())
     if max_games is not None:
         if recent_first:
@@ -274,9 +482,9 @@ def sync_games_from_scoreboard(session: Session, teams_by_nba: dict[int, Team], 
             continue
 
         games_hdr = games_hdr.copy()
-        games_hdr["gameId"] = games_hdr["gameId"].astype(str).str.strip()
+        games_hdr["gameId"] = games_hdr["gameId"].map(normalize_nba_game_id_str)
         teams_lines = teams_lines.copy()
-        teams_lines["gameId"] = teams_lines["gameId"].astype(str).str.strip()
+        teams_lines["gameId"] = teams_lines["gameId"].map(normalize_nba_game_id_str)
 
         for _, hdr in games_hdr.iterrows():
             nba_gid = str(hdr["gameId"]).strip()
@@ -428,7 +636,8 @@ def _apply_player_stat_row(
     reb: int,
     ast: int,
     mins: float,
-) -> None:
+) -> int:
+    """Upsert one ``PlayerGameStat``. Returns ``1`` if written, ``0`` if player unknown."""
     player = session.scalar(select(Player).where(Player.nba_player_id == nba_player_id))
     if player is None:
         logger.warning(
@@ -436,7 +645,7 @@ def _apply_player_stat_row(
             nba_player_id,
             game.nba_game_id,
         )
-        return
+        return 0
     row = session.scalar(
         select(PlayerGameStat).where(
             PlayerGameStat.player_id == player.id,
@@ -458,17 +667,29 @@ def _apply_player_stat_row(
         row.rebounds = reb
         row.assists = ast
         row.minutes = mins
+    return 1
 
 
 def ingest_box_score_for_game(session: Session, game: Game) -> int:
-    """Fetch box score and upsert PlayerGameStat rows. Returns rows written/updated."""
-    gid = game.nba_game_id
+    """Fetch box score and upsert PlayerGameStat rows. Returns **DB rows written/updated**."""
+    gid = normalize_nba_game_id_str(game.nba_game_id)
+    if len(gid) != 10 or not gid.isdigit():
+        logger.warning("Bad NBA game id for box score: db_game.id=%s nba_game_id=%r", game.id, game.nba_game_id)
+        return 0
+
     status = _summary_status(gid)
     if status:
         game.status = status[:64]
 
-    # Also backfill final team scores for historical games.
-    pts_by_team = _box_score_team_points_v3(gid)
+    # One Stats JSON fetch that matches what the league site uses; prefer it over nba_api DataFrames
+    # (V2 is empty for 2025-26+, and the V3 pandas parser can throw when team ``statistics`` is null).
+    traditional_raw = _fetch_boxscore_traditional_v3_raw_dict(gid)
+    bt = (traditional_raw or {}).get("boxScoreTraditional") or {}
+    api_slots = _count_traditional_player_rows(bt)
+
+    pts_by_team = _team_points_from_traditional_bt(bt)
+    if not pts_by_team:
+        pts_by_team = _box_score_team_points_v3(gid)
     if pts_by_team is None:
         pts_by_team = _box_score_team_points_v2(gid)
     if pts_by_team:
@@ -480,39 +701,66 @@ def ingest_box_score_for_game(session: Session, game: Game) -> int:
         if away_team is not None:
             game.away_score = pts_by_team.get(away_team.nba_team_id)
 
-    df = _box_score_rows_v3(gid)
-    if df is None:
-        df = _box_score_rows_v2(gid)
-    if df is None:
-        logger.warning("No box score for game %s", gid)
-        return 0
+    applied = 0
+    source = "none"
+    slots_trad = 0
+    slots_live = 0
 
-    n = 0
-    if "personId" in df.columns:
-        for _, r in df.iterrows():
-            pid = int(r["personId"])
-            if pid <= 0:
-                continue
-            pts = normalize_stat_int(r.get("points"))
-            reb = normalize_stat_int(r.get("reboundsTotal"))
-            ast = normalize_stat_int(r.get("assists"))
-            mins = parse_minutes(r.get("minutes"))
-            _apply_player_stat_row(session, game, pid, pts, reb, ast, mins)
-            n += 1
+    if api_slots > 0:
+        slots_trad, applied = _apply_players_from_traditional_bt(session, game, bt)
+        if applied > 0:
+            source = "traditional_json"
+
+    if applied == 0:
+        live_payload = _fetch_cdn_live_boxscore_game_dict(gid)
+        if live_payload:
+            gst = live_payload.get("gameStatusText")
+            if gst:
+                game.status = str(gst).strip()[:64]
+            _apply_scores_from_cdn_live_game(game, live_payload)
+            slots_live, applied_live = _apply_players_from_cdn_live_game(session, game, live_payload)
+            if applied_live > 0:
+                applied = applied_live
+                source = "cdn_live"
+
+    if applied == 0:
+        slots_df, applied_df = _apply_players_from_traditional_dataframes(session, game, gid)
+        if applied_df > 0:
+            applied = applied_df
+            source = "traditional_dataframe"
+        slots_seen_warn = max(slots_trad, slots_live, slots_df)
     else:
-        for _, r in df.iterrows():
-            pid = int(r["PLAYER_ID"])
-            if pid <= 0:
-                continue
-            pts = normalize_stat_int(r.get("PTS"))
-            reb = normalize_stat_int(r.get("REB"))
-            ast = normalize_stat_int(r.get("AST"))
-            mins = parse_minutes(r.get("MIN"))
-            _apply_player_stat_row(session, game, pid, pts, reb, ast, mins)
-            n += 1
+        slots_seen_warn = max(slots_trad, slots_live)
+
+    away_s = game.away_score
+    home_s = game.home_score
+    logger.info(
+        "Box ingest nba_game_id=%s status=%r trad_slots=%d live_slots=%d applied_db=%d source=%s score=%s-%s",
+        gid,
+        (game.status or "")[:48],
+        slots_trad,
+        slots_live,
+        applied,
+        source,
+        away_s,
+        home_s,
+    )
+
+    if slots_seen_warn > 0 and applied == 0:
+        logger.warning(
+            "NBA/CDN returned %d player stat slots for nba_game_id=%s but wrote 0 to DB — "
+            "sync rosters (run ingest with WORKER_SKIP_ROSTERS=false or CLI without --skip-rosters).",
+            slots_seen_warn,
+            gid,
+        )
+    elif applied == 0 and api_slots == 0 and slots_live == 0:
+        logger.info(
+            "nba_game_id=%s: no player lines from Stats traditional or CDN liveData yet (pregame / API gap).",
+            gid,
+        )
 
     session.flush()
-    return n
+    return applied
 
 
 def run_full_ingest(

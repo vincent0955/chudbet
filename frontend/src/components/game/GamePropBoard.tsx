@@ -8,6 +8,8 @@ type Props = {
   bundle: GamePropLinesBundle
   /** Matchup + date for bet slip grouping (same for every leg from this board). */
   slipGameHeader?: string
+  /** True when tip-off occurred or game ended — disables adding props. */
+  wageringLocked?: boolean
 }
 
 const PROP_SECTIONS: { stat: StatType; title: string }[] = [
@@ -40,6 +42,7 @@ function PropPickButtons({
   line,
   overAmerican,
   underAmerican,
+  disabled,
 }: {
   gameId: number
   slipGameHeader?: string
@@ -48,6 +51,7 @@ function PropPickButtons({
   line: number
   overAmerican: string
   underAmerican: string
+  disabled?: boolean
 }) {
   const { addLeg, hasLeg, removeLegByLeg } = useBetSlip()
   const lineLabel = formatHalfPointLine(line)
@@ -69,6 +73,7 @@ function PropPickButtons({
   const underSelected = hasLeg({ kind: 'player', leg: underLeg })
 
   const toggle = (direction: 'OVER' | 'UNDER') => {
+    if (disabled) return
     const leg = direction === 'OVER' ? overLeg : underLeg
     const opposite = direction === 'OVER' ? underLeg : overLeg
     if (hasLeg({ kind: 'player', leg })) {
@@ -97,6 +102,7 @@ function PropPickButtons({
         className={`game-props__ou-btn${overSelected ? ' game-props__ou-btn--selected' : ''}`}
         onClick={() => toggle('OVER')}
         aria-pressed={overSelected}
+        disabled={disabled}
       >
         <span className="game-props__ou-btn-label">O {lineLabel}</span>
         <span className="game-props__ou-btn-odds muted">{overAmerican}</span>
@@ -106,6 +112,7 @@ function PropPickButtons({
         className={`game-props__ou-btn${underSelected ? ' game-props__ou-btn--selected' : ''}`}
         onClick={() => toggle('UNDER')}
         aria-pressed={underSelected}
+        disabled={disabled}
       >
         <span className="game-props__ou-btn-label">U {lineLabel}</span>
         <span className="game-props__ou-btn-odds muted">{underAmerican}</span>
@@ -114,7 +121,7 @@ function PropPickButtons({
   )
 }
 
-export function GamePropBoard({ bundle, slipGameHeader }: Props) {
+export function GamePropBoard({ bundle, slipGameHeader, wageringLocked }: Props) {
   const { game, min_samples, players } = bundle
   const ordered = players
 
@@ -145,6 +152,11 @@ export function GamePropBoard({ bundle, slipGameHeader }: Props) {
 
   return (
     <div className="game-props">
+      {wageringLocked && (
+        <div className="card game-props__locked-banner" role="status">
+          <p className="muted">This game is in progress or finished — new picks are disabled.</p>
+        </div>
+      )}
       {PROP_SECTIONS.map(({ stat, title }) => {
         const sectionPlayers = topPlayersForStat(stat)
         return (
@@ -211,6 +223,7 @@ export function GamePropBoard({ bundle, slipGameHeader }: Props) {
                           line={line}
                           overAmerican={odds.over}
                           underAmerican={odds.under}
+                          disabled={wageringLocked}
                         />
                       ) : (
                         <span className="game-props__pick-na muted">Need ≥{min_samples} prior games</span>

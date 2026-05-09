@@ -18,9 +18,21 @@ Outcome = Literal["pending", "void", "win", "loss"]
 
 
 def _is_final_status(status: str | None) -> bool:
+    """True when NBA ``gameStatusText`` indicates the game is finished (not live)."""
     if not status:
         return False
-    return "final" in status.lower()
+    s = status.strip().lower()
+    if "final" in s:
+        return True
+    # Rare shorthand feeds
+    if s.startswith("f/") or s.startswith("f "):
+        return True
+    return False
+
+
+def _is_game_gradeable(game: Game) -> bool:
+    """Legs and tickets stay pending until the game is decisively over."""
+    return _is_final_status(game.status)
 
 
 def _stat_value(row: PlayerGameStat, st: StatType) -> int:
@@ -67,15 +79,14 @@ def _evaluate_leg(session: Session, leg: ParlayLeg) -> Literal["win", "loss", "v
     game = session.get(Game, leg.game_id)
     if game is None:
         return "void"
+    if not _is_game_gradeable(game):
+        return "pending"
     row = session.scalar(
         select(PlayerGameStat).where(
             PlayerGameStat.player_id == leg.player_id,
             PlayerGameStat.game_id == leg.game_id,
         )
     )
-    # Prefer concrete stat availability over status text; this avoids stale-status tickets staying pending.
-    if row is None and not _is_final_status(game.status):
-        return "pending"
     if row is None:
         return "void"
     val = float(_stat_value(row, leg.stat_type))
@@ -93,13 +104,10 @@ def _evaluate_game_leg(session: Session, leg: ParlayGameLeg) -> Literal["win", "
     game = session.get(Game, leg.game_id)
     if game is None:
         return "void"
-    # Prefer concrete scoreboard availability over status text, but treat 0-0 non-final as placeholder (pending).
-    if game.home_score is None or game.away_score is None:
-        if not _is_final_status(game.status):
-            return "pending"
-        return "void"
-    if game.home_score == 0 and game.away_score == 0 and not _is_final_status(game.status):
+    if not _is_game_gradeable(game):
         return "pending"
+    if game.home_score is None or game.away_score is None:
+        return "void"
 
     home = float(game.home_score)
     away = float(game.away_score)
