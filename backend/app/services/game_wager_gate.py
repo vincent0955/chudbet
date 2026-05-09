@@ -20,7 +20,7 @@ def status_indicates_live_or_finished(status: str | None) -> bool:
         return False
     if any(x in s for x in ("FINAL", "POSTPONED", "CANCELLED")):
         return True
-    if "HALFTIME" in s or "END OF" in s:
+    if "HALFTIME" in s or "HALF" in s or "END OF" in s:
         return True
     if _SHORT_QTR.search(s) or _ORDINAL_QTR.search(s):
         return True
