@@ -52,6 +52,10 @@ services:
       WORKER_INGEST_INTERVAL_SEC: "900"
       WORKER_SETTLE_INTERVAL_SEC: "120"
       WORKER_SCOREBOARD_DAYS: "3"
+      # Eastern dates going back this many days still get scoreboard rows (needed when SKIP_GAMES=true).
+      WORKER_SCOREBOARD_PAST_DAYS: "5"
+      # Re-fetch box for every game on an OPEN ticket before grading (covers games outside scoreboard window).
+      WORKER_REFRESH_OPEN_WAGER_GAMES_BEFORE_SETTLE: "true"
       WORKER_SKIP_ROSTERS: "true"
       WORKER_SKIP_GAMES: "true"
     depends_on:

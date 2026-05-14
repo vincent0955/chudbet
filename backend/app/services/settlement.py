@@ -22,7 +22,7 @@ def _is_final_status(status: str | None) -> bool:
     if not status:
         return False
     s = status.strip().lower()
-    if "final" in s:
+    if "final" in s or "game over" in s:
         return True
     # Rare shorthand feeds
     if s.startswith("f/") or s.startswith("f "):
@@ -65,11 +65,23 @@ def _normalize_persisted_outcome(value: str | None) -> LegUiOutcome | None:
     return None
 
 
+def _parlay_has_open_wager(session: Session, parlay_id: int) -> bool:
+    return (
+        session.scalar(
+            select(Wager.id)
+            .where(Wager.parlay_id == parlay_id, Wager.status == WagerStatus.OPEN)
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def leg_ui_outcome(session: Session, leg: ParlayLeg) -> LegUiOutcome:
     """How to display one leg on the parlay page."""
-    persisted = _normalize_persisted_outcome(getattr(leg, "outcome_status", None))
-    if persisted is not None:
-        return persisted
+    if not _parlay_has_open_wager(session, leg.parlay_id):
+        persisted = _normalize_persisted_outcome(getattr(leg, "outcome_status", None))
+        if persisted is not None:
+            return persisted
     return _ui_from_eval_result(_evaluate_leg(session, leg))
 
 
@@ -88,15 +100,16 @@ def _evaluate_leg(session: Session, leg: ParlayLeg) -> Literal["win", "loss", "v
         )
     )
     if row is None:
-        return "void"
+        return "pending"
     val = float(_stat_value(row, leg.stat_type))
     return "win" if _leg_stat_hit(val, float(leg.line), leg.direction) else "loss"
 
 
 def game_leg_ui_outcome(session: Session, leg: ParlayGameLeg) -> LegUiOutcome:
-    persisted = _normalize_persisted_outcome(getattr(leg, "outcome_status", None))
-    if persisted is not None:
-        return persisted
+    if not _parlay_has_open_wager(session, leg.parlay_id):
+        persisted = _normalize_persisted_outcome(getattr(leg, "outcome_status", None))
+        if persisted is not None:
+            return persisted
     return _ui_from_eval_result(_evaluate_game_leg(session, leg))
 
 
@@ -107,7 +120,7 @@ def _evaluate_game_leg(session: Session, leg: ParlayGameLeg) -> Literal["win", "
     if not _is_game_gradeable(game):
         return "pending"
     if game.home_score is None or game.away_score is None:
-        return "void"
+        return "pending"
 
     home = float(game.home_score)
     away = float(game.away_score)

@@ -25,9 +25,10 @@ from nba_api.live.nba.endpoints.boxscore import BoxScore
 from nba_api.stats.library.http import NBAStatsHTTP
 from nba_api.stats.static import teams as static_teams
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Game, Player, PlayerGameStat, Team
+from app.db.enums import WagerStatus
+from app.db.models import Game, Parlay, ParlayGameLeg, ParlayLeg, Player, PlayerGameStat, Team, Wager
 from app.ingestion.minutes import normalize_stat_int, parse_minutes
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,9 @@ def _is_final_status_text(status: str | None) -> bool:
     if not status:
         return False
     s = status.strip().lower()
-    return ("final" in s) or s.startswith("f/") or s.startswith("f ")
+    if "final" in s or "game over" in s:
+        return True
+    return s.startswith("f/") or s.startswith("f ")
 
 
 def sync_teams(session: Session) -> dict[int, Team]:
@@ -761,7 +764,8 @@ def ingest_box_score_for_game(session: Session, game: Game) -> int:
         or game.away_score is None
         or (game.home_score == 0 and game.away_score == 0)
     )
-    should_try_live = applied == 0 or (score_looks_stale and not _is_final_status_text(game.status))
+    # Finals: traditional JSON can expose player rows while team points stay 0-0/null; CDN still has truth.
+    should_try_live = applied == 0 or score_looks_stale
     if should_try_live:
         live_payload = _fetch_cdn_live_boxscore_game_dict(gid)
         if live_payload:
@@ -812,6 +816,46 @@ def ingest_box_score_for_game(session: Session, game: Game) -> int:
 
     session.flush()
     return applied
+
+
+def refresh_games_for_open_wagers(session: Session) -> int:
+    """Re-fetch box scores for every game referenced by an OPEN wager.
+
+    With ``WORKER_SKIP_GAMES=true``, full ingest only box-touches games that appear on the
+    scoreboard window. Games from earlier dates can stop being refreshed while wagers stay
+    open—this routine closes that gap so settlement and the slip use the same DB scores/stats.
+    """
+    wagers = session.scalars(
+        select(Wager)
+        .where(Wager.status == WagerStatus.OPEN)
+        .options(
+            selectinload(Wager.parlay).selectinload(Parlay.legs),
+            selectinload(Wager.parlay).selectinload(Parlay.game_legs),
+        ),
+    ).all()
+    game_ids: set[int] = set()
+    for w in wagers:
+        p = w.parlay
+        if p is None:
+            continue
+        for lg in p.legs:
+            if lg.game_id is not None:
+                game_ids.add(lg.game_id)
+        for gl in p.game_legs:
+            game_ids.add(gl.game_id)
+
+    n = 0
+    for gid in sorted(game_ids):
+        game = session.get(Game, gid)
+        if game is None:
+            continue
+        try:
+            ingest_box_score_for_game(session, game)
+            n += 1
+        except Exception:
+            logger.exception("refresh_games_for_open_wagers failed for game id=%s", gid)
+            session.rollback()
+    return n
 
 
 def run_full_ingest(

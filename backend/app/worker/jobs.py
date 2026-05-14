@@ -11,7 +11,7 @@ from app.db.base import Base
 from app.db import models  # noqa: F401 — register models
 from app.db.migrate import ensure_postgres_schema
 from app.db.session import get_engine
-from app.ingestion.nba_sync import run_full_ingest
+from app.ingestion.nba_sync import refresh_games_for_open_wagers, run_full_ingest
 from app.services.settlement import settle_open_wagers
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,10 @@ def run_settlement_job() -> None:
     ensure_postgres_schema(engine)
 
     with Session(engine) as session:
+        if _truthy("WORKER_REFRESH_OPEN_WAGER_GAMES_BEFORE_SETTLE", "true"):
+            refreshed = refresh_games_for_open_wagers(session)
+            session.commit()
+            logger.info("Refreshed box scores for %d game(s) tied to open wagers", refreshed)
         summary = settle_open_wagers(session)
         session.commit()
     logger.info("Settlement job finished: %s", summary)
