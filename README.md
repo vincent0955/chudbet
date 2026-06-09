@@ -33,13 +33,28 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-**Frontend** (Vitest):
+**Frontend unit tests** (Vitest):
 
 ```bash
 cd frontend
 npm install
 npm test
 ```
+
+**Frontend end-to-end / integration tests** (Playwright): these run the real Vite
+frontend and stub the backend API at the network layer, so they need neither the
+backend nor Postgres. The first run downloads a browser.
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium   # one-time browser download
+npm run test:e2e
+```
+
+The E2E suite covers the main features: the home schedule, auth (guest login /
+signup / logout), wallet deposits, the game prop board, building and placing a
+parlay end to end, and the My Bets open/settled views.
 
 ## Screenshots
 
