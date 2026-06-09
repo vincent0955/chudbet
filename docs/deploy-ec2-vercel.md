@@ -33,7 +33,9 @@ Edit `.env.prod`:
 
 ```bash
 cd /opt/chudbet
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+docker build -t chudbet-backend -f backend/Dockerfile ./backend
+docker build -t chudbet-worker -f backend/Dockerfile ./backend
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
 
@@ -95,7 +97,9 @@ Run after each deploy:
 If deploy is unhealthy:
 1. Revert to previous commit on EC2.
 2. Rebuild/restart:
-   - `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`
+   - `docker build -t chudbet-backend -f backend/Dockerfile ./backend`
+   - `docker build -t chudbet-worker -f backend/Dockerfile ./backend`
+   - `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build`
 3. Re-check `/health` and key user flows.
 
 ## 9) CI/CD (GitHub Actions)
@@ -111,7 +115,9 @@ The pipeline in `.github/workflows/ci-cd.yml` runs on every push and pull reques
    cd /opt/chudbet
    git fetch --all
    git reset --hard origin/main
-   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+   docker build -t chudbet-backend -f backend/Dockerfile ./backend
+   docker build -t chudbet-worker -f backend/Dockerfile ./backend
+   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build
    docker image prune -f
    set -a && . ./.env.prod && set +a
    curl -fsS "https://${API_DOMAIN}/health"
@@ -186,3 +192,4 @@ Notes:
 - `git reset --hard origin/main` discards any local commits on the server by design; `.env.prod` is untracked and therefore preserved.
 - DB schema changes need no extra step — backend startup runs `Base.metadata.create_all` + `ensure_postgres_schema` (`backend/app/main.py`).
 - The job prints the script's stdout/stderr from SSM and fails the build if the invocation status is not `Success` (so a failed `/health` check fails the deploy).
+- Images are built with `docker build` (not `docker compose build`) because older EC2 Docker installs may lack Buildx 0.17+, which newer Compose requires for `--build`.

@@ -18,6 +18,7 @@ services:
       - app_net
 
   backend:
+    image: chudbet-backend
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -57,6 +58,7 @@ services:
       - app_net
 
   worker:
+    image: chudbet-worker
     build:
       context: ./backend
       dockerfile: Dockerfile
