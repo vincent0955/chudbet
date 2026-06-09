@@ -113,7 +113,8 @@ The pipeline in `.github/workflows/ci-cd.yml` runs on every push and pull reques
    git reset --hard origin/main
    docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
    docker image prune -f
-   curl -fsS "https://$API_DOMAIN/health"
+   set -a && . ./.env.prod && set +a
+   curl -fsS "https://${API_DOMAIN}/health"
    ```
 
 The frontend is **not** deployed here — Vercel's Git integration auto-deploys `frontend/` on pushes to `main` independently.
@@ -180,6 +181,8 @@ Set these under **Settings → Secrets and variables → Actions**:
 
 Notes:
 - SSM `AWS-RunShellScript` runs as `root` without a default `$HOME`; the workflow sets `HOME=/root` and passes `git -c safe.directory=/opt/chudbet` so git can operate in a tree that may be owned by `ec2-user`.
+- The deploy script logs each step (`==> git fetch`, etc.) and on failure prints `docker compose ps` plus recent `backend`/`caddy` logs so the GitHub job shows why it broke.
+- `API_DOMAIN` is loaded with `set -a && . ./.env.prod && set +a` (not `grep | xargs`), because `grep` exits 1 when no match and `set -e` would fail the job with no useful output.
 - `git reset --hard origin/main` discards any local commits on the server by design; `.env.prod` is untracked and therefore preserved.
 - DB schema changes need no extra step — backend startup runs `Base.metadata.create_all` + `ensure_postgres_schema` (`backend/app/main.py`).
 - The job prints the script's stdout/stderr from SSM and fails the build if the invocation status is not `Success` (so a failed `/health` check fails the deploy).

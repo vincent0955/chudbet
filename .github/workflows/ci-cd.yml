@@ -109,15 +109,26 @@ jobs:
             "workingDirectory": ["/opt/chudbet"],
             "executionTimeout": ["1800"],
             "commands": [
-              "set -euo pipefail",
+              "set -eo pipefail",
               "export HOME=/root",
+              "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
               "cd /opt/chudbet",
-              "git -c safe.directory=/opt/chudbet fetch --all",
-              "git -c safe.directory=/opt/chudbet reset --hard origin/main",
-              "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build",
-              "docker image prune -f",
-              "export $(grep -E '^API_DOMAIN=' .env.prod | xargs)",
-              "curl -fsS \"https://$API_DOMAIN/health\""
+              "deploy_fail() { echo \"DEPLOY FAILED at: $1\" >&2; docker compose -f docker-compose.prod.yml --env-file .env.prod ps 2>&1 || true; docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail=80 backend caddy 2>&1 || true; exit 1; }",
+              "echo '==> git fetch'",
+              "git -c safe.directory=/opt/chudbet fetch --all || deploy_fail git-fetch",
+              "echo '==> git reset'",
+              "git -c safe.directory=/opt/chudbet reset --hard origin/main || deploy_fail git-reset",
+              "echo '==> docker compose up'",
+              "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build 2>&1 || deploy_fail docker-compose-up",
+              "echo '==> docker image prune'",
+              "docker image prune -f 2>&1 || true",
+              "echo '==> load API_DOMAIN from .env.prod'",
+              "test -f .env.prod || deploy_fail missing-env-prod",
+              "set -a && . ./.env.prod && set +a",
+              "test -n \"${API_DOMAIN:-}\" || deploy_fail missing-api-domain",
+              "echo \"==> health check https://${API_DOMAIN}/health\"",
+              "for i in 1 2 3 4 5 6 7 8 9 10; do if curl -fsS \"https://${API_DOMAIN}/health\"; then echo; echo '==> health check passed'; exit 0; fi; echo \"health check attempt $i failed, retrying in 5s...\"; sleep 5; done",
+              "deploy_fail health-check"
             ]
           }
           JSON
