@@ -1,0 +1,154 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to main supersedes an in-flight run (including its deploy).
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+      - name: Run pytest
+        working-directory: backend
+        # Uses in-memory SQLite (tests/conftest.py); no Postgres service required.
+        run: pytest
+
+  frontend-tests:
+    name: Frontend tests (lint + vitest + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Unit tests
+        working-directory: frontend
+        run: npm test
+      - name: Type-check & build
+        working-directory: frontend
+        run: npm run build
+
+  e2e-tests:
+    name: E2E tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright tests
+        working-directory: frontend
+        # playwright.config.ts starts the Vite server itself (reuseExistingServer is off in CI).
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  deploy:
+    name: Deploy backend to EC2 (SSM)
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, e2e-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write # required for GitHub OIDC -> AWS role assumption
+      contents: read
+    env:
+      EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+    steps:
+      - name: Configure AWS credentials (OIDC, no static keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy via SSM (git pull + docker compose up, no inbound SSH)
+        run: |
+          set -euo pipefail
+
+          # Static deploy script run on the instance by the SSM agent (as root).
+          # Quoted heredoc keeps $API_DOMAIN literal so it expands on the box, not here.
+          cat > ssm-params.json <<'JSON'
+          {
+            "workingDirectory": ["/opt/chudbet"],
+            "executionTimeout": ["1800"],
+            "commands": [
+              "set -euo pipefail",
+              "cd /opt/chudbet",
+              "git config --global --add safe.directory /opt/chudbet",
+              "git fetch --all",
+              "git reset --hard origin/main",
+              "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build",
+              "docker image prune -f",
+              "export $(grep -E '^API_DOMAIN=' .env.prod | xargs)",
+              "curl -fsS \"https://$API_DOMAIN/health\""
+            ]
+          }
+          JSON
+
+          command_id=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy ${GITHUB_SHA::7} from ${GITHUB_REF_NAME}" \
+            --parameters file://ssm-params.json \
+            --query "Command.CommandId" --output text)
+          echo "SSM CommandId: $command_id"
+
+          # Give the invocation a moment to register, then wait for a terminal state.
+          sleep 5
+          aws ssm wait command-executed \
+            --command-id "$command_id" \
+            --instance-id "$EC2_INSTANCE_ID" || true
+
+          status=$(aws ssm get-command-invocation \
+            --command-id "$command_id" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --query "Status" --output text)
+
+          echo "::group::SSM stdout"
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$EC2_INSTANCE_ID" \
+            --query "StandardOutputContent" --output text
+          echo "::endgroup::"
+          echo "::group::SSM stderr"
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$EC2_INSTANCE_ID" \
+            --query "StandardErrorContent" --output text
+          echo "::endgroup::"
+
+          echo "Deploy status: $status"
+          [ "$status" = "Success" ] || exit 1

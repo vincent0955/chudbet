@@ -2,6 +2,22 @@
 
 ChudBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet on only a certain amount of legs hitting.
 
+## How it works
+
+The **frontend** (React + Vite) talks to a **FastAPI** backend over JSON. In production the API runs on EC2 behind Caddy; the UI is hosted on Vercel.
+
+The **backend** has three moving parts:
+
+1. **API** (`backend/app/`) — serves teams, games, player props, and markets; prices parlays; manages auth and wallets. On startup it ensures the Postgres schema exists and applies lightweight migrations.
+
+2. **Worker** (`backend/app/worker/`) — a separate process on a schedule. It ingests NBA scoreboard and box-score data into Postgres (`nba_api`), then grades open wagers against final stats (player props and game lines).
+
+3. **Postgres** — stores the slate (teams, players, games, box scores), saved parlay snapshots, and a ledger-backed wallet per account.
+
+**Placing a bet:** the client sends a parlay definition (player props and/or game legs, standard or X-of-Y, hit or anti). The API calculates leg probabilities from recent player stats (normal approximation) and implied odds for game legs, combines them into a ticket price, debits the stake from the account ledger, and stores an immutable parlay + wager row.
+
+**Settlement:** when games finish, the worker compares each leg to box scores, resolves the ticket (all-hit, X-of-Y, or anti), and credits payouts or marks the wager lost/void. Balances change only through append-only ledger entries.
+
 ## Local Setup
 **Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Compose, and [Node.js](https://nodejs.org/) 20+ for the frontend.
 
@@ -41,9 +57,7 @@ npm install
 npm test
 ```
 
-**Frontend end-to-end / integration tests** (Playwright): these run the real Vite
-frontend and stub the backend API at the network layer, so they need neither the
-backend nor Postgres. The first run downloads a browser.
+**Frontend end-to-end / integration tests** (Playwright): 
 
 ```bash
 cd frontend
@@ -52,9 +66,14 @@ npx playwright install chromium   # one-time browser download
 npm run test:e2e
 ```
 
-The E2E suite covers the main features: the home schedule, auth (guest login /
-signup / logout), wallet deposits, the game prop board, building and placing a
-parlay end to end, and the My Bets open/settled views.
+## CI/CD
+
+GitHub Actions (`.github/workflows/ci-cd.yml`) runs all the test suites above on
+every push and pull request to `main`. When tests pass on a push to `main`, it
+assumes an AWS role via GitHub OIDC and uses AWS Systems Manager (SSM) to redeploy
+the backend on EC2 (`git reset --hard` +
+`docker compose -f docker-compose.prod.yml up -d --build`) — no inbound SSH and no
+static AWS keys.
 
 ## Screenshots
 

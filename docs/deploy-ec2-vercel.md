@@ -97,3 +97,89 @@ If deploy is unhealthy:
 2. Rebuild/restart:
    - `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`
 3. Re-check `/health` and key user flows.
+
+## 9) CI/CD (GitHub Actions)
+
+The pipeline in `.github/workflows/ci-cd.yml` runs on every push and pull request to `main`:
+
+1. `backend-tests` — `pytest` (uses in-memory SQLite, no Postgres needed).
+2. `frontend-tests` — ESLint, Vitest, and a type-checked build.
+3. `e2e-tests` — Playwright E2E (with the report uploaded as an artifact on failure).
+4. `deploy` — only on a push to `main`, and only after all three test jobs pass. It assumes an AWS role via **GitHub OIDC** (no long-lived AWS keys, no inbound SSH) and uses **AWS Systems Manager (SSM)** `send-command` to run the same steps you would by hand on the instance:
+
+   ```bash
+   cd /opt/chudbet
+   git fetch --all
+   git reset --hard origin/main
+   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+   docker image prune -f
+   curl -fsS "https://$API_DOMAIN/health"
+   ```
+
+The frontend is **not** deployed here — Vercel's Git integration auto-deploys `frontend/` on pushes to `main` independently.
+
+### Deploy mechanism: SSM + OIDC (no inbound SSH)
+
+Because the deploy runs via SSM, **port 22 stays closed to the internet**. GitHub Actions never connects to the box directly; it tells SSM to run the script, and the on-box SSM agent executes it (as `root`).
+
+One-time AWS setup:
+
+1. **Let the instance be managed by SSM.** Attach an instance profile with the managed policy `AmazonSSMManagedInstanceCore` to the EC2 instance. (The SSM agent is preinstalled on Amazon Linux.) Confirm the instance appears under **Systems Manager → Fleet Manager / Managed instances** with a "Connected/Online" ping status.
+
+2. **Create the GitHub OIDC identity provider in IAM** (once per AWS account):
+   - Provider URL: `https://token.actions.githubusercontent.com`
+   - Audience: `sts.amazonaws.com`
+
+3. **Create an IAM role** (e.g. `chudbet-github-deploy`) the workflow can assume. Trust policy (replace `<ACCOUNT_ID>` and the repo if it changes):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Principal": { "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com" },
+       "Action": "sts:AssumeRoleWithWebIdentity",
+       "Condition": {
+         "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
+         "StringLike": { "token.actions.githubusercontent.com:sub": "repo:vincent0955/chudbet:ref:refs/heads/main" }
+       }
+     }]
+   }
+   ```
+
+4. **Attach a permissions policy** to that role allowing it to run a command on the one instance and read the result (replace `<REGION>`, `<ACCOUNT_ID>`, `<INSTANCE_ID>`):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": "ssm:SendCommand",
+         "Resource": [
+           "arn:aws:ssm:<REGION>::document/AWS-RunShellScript",
+           "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:instance/<INSTANCE_ID>"
+         ]
+       },
+       {
+         "Effect": "Allow",
+         "Action": ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations", "ssm:ListCommands"],
+         "Resource": "*"
+       }
+     ]
+   }
+   ```
+
+### Required repository secrets
+
+Set these under **Settings → Secrets and variables → Actions**:
+
+- `AWS_DEPLOY_ROLE_ARN` — ARN of the IAM role from step 3 (e.g. `arn:aws:iam::123456789012:role/chudbet-github-deploy`).
+- `AWS_REGION` — region the instance runs in (e.g. `us-east-1`).
+- `EC2_INSTANCE_ID` — target instance id (e.g. `i-0abc123...`), found in the EC2 console.
+
+Notes:
+- SSM `AWS-RunShellScript` runs as `root`; the workflow adds `git config --global --add safe.directory /opt/chudbet` so git is happy operating in a tree that may be owned by `ec2-user`.
+- `git reset --hard origin/main` discards any local commits on the server by design; `.env.prod` is untracked and therefore preserved.
+- DB schema changes need no extra step — backend startup runs `Base.metadata.create_all` + `ensure_postgres_schema` (`backend/app/main.py`).
+- The job prints the script's stdout/stderr from SSM and fails the build if the invocation status is not `Success` (so a failed `/health` check fails the deploy).
