@@ -179,7 +179,7 @@ Set these under **Settings → Secrets and variables → Actions**:
 - `EC2_INSTANCE_ID` — target instance id (e.g. `i-0abc123...`), found in the EC2 console.
 
 Notes:
-- SSM `AWS-RunShellScript` runs as `root`; the workflow adds `git config --global --add safe.directory /opt/chudbet` so git is happy operating in a tree that may be owned by `ec2-user`.
+- SSM `AWS-RunShellScript` runs as `root` without a default `$HOME`; the workflow sets `HOME=/root` and passes `git -c safe.directory=/opt/chudbet` so git can operate in a tree that may be owned by `ec2-user`.
 - `git reset --hard origin/main` discards any local commits on the server by design; `.env.prod` is untracked and therefore preserved.
 - DB schema changes need no extra step — backend startup runs `Base.metadata.create_all` + `ensure_postgres_schema` (`backend/app/main.py`).
 - The job prints the script's stdout/stderr from SSM and fails the build if the invocation status is not `Success` (so a failed `/health` check fails the deploy).
