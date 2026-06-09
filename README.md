@@ -23,6 +23,24 @@ ChudBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet
 
    Open the URL Vite prints (usually [http://localhost:5173](http://localhost:5173)).
 
+## Tests
+
+**Backend** (pytest; uses an in-memory SQLite database, so no Postgres or Docker is needed):
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+
+**Frontend** (Vitest):
+
+```bash
+cd frontend
+npm install
+npm test
+```
+
 ## Screenshots
 
 ![Home: upcoming games and bet slip](docs/Screenshot%202026-05-08%20154912.png)
