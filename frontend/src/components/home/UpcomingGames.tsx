@@ -360,7 +360,7 @@ export function UpcomingGames() {
       <h2 className="upcoming-games__title">Upcoming games</h2>
 
       {upcoming.length === 0 ? (
-        <p className="muted upcoming-games__empty">No upcoming games in the feed (try refreshing ingestion).</p>
+        <p className="muted upcoming-games__empty">No upcoming NBA games at the moment.</p>
       ) : (
         <div className="upcoming-games__schedule">
           <div className="upcoming-games__market-head-row">
