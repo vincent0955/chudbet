@@ -162,3 +162,17 @@ class ParlayRead(BaseModel):
         if self.p_hit is None:
             return None
         return self.p_hit if self.wager_on_hit else (1.0 - self.p_hit)
+
+    @computed_field
+    @property
+    def payout_decimal_odds(self) -> float | None:
+        """Server payout odds (fair odds reduced by house margin).
+
+        Prefer the persisted margined value from `metadata_json`; fall back to
+        `fair_decimal_odds` when no margined value is available.
+        """
+        if isinstance(self.metadata_json, dict):
+            raw = self.metadata_json.get("payout_decimal_odds")
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                return float(raw)
+        return self.fair_decimal_odds

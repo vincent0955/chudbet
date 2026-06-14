@@ -18,6 +18,7 @@ from app.api.money_schemas import (
 from app.api.auth import get_current_user
 from app.db.models import Account, LedgerEntry, Parlay, Wager
 from app.parlay.display import parlay_detail_load_options, parlay_read_with_leg_display
+from app.parlay.pricing import PricingError
 from app.db.session import get_db
 from app.services import money
 from app.db.models import User
@@ -90,6 +91,9 @@ def post_wager(account_id: int, body: WagerPlace, db: Db, user: User = Depends(g
     except money.InsufficientBalanceError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Insufficient balance") from None
+    except PricingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc

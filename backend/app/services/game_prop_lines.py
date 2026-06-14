@@ -9,11 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import GamePropLinesBundle, GameRead, PlayerPropLinesRead
+from app.core.config import get_book_margin
 from app.db.models import Game, Player, PlayerGameStat, Team
 
 GAME_PROP_LOOKBACK = 10
 GAME_PROP_MIN_SAMPLES = 3
-BOOK_MARGIN = 0.14
+BOOK_MARGIN = get_book_margin()
 
 
 def _half_point_line(values: list[int]) -> float | None:

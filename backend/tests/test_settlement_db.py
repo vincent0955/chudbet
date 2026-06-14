@@ -76,7 +76,8 @@ class TestSettleOpenWagers:
         session.refresh(wager)
         assert wager.status == WagerStatus.WON
         account = session.get(Account, wager.account_id)
-        assert account.balance_cents == 11_000  # 10_000 - 1_000 + 2_000
+        # Payout is the server-priced potential return, not the (ignored) client odds.
+        assert account.balance_cents == 10_000 - 1_000 + wager.potential_return_cents
 
     def test_home_loss_settles_as_lost(self, session: Session) -> None:
         game = _seed_game(session)

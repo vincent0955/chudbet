@@ -14,10 +14,11 @@ from app.api.schemas import (
     GameTotalMarketRead,
     GameRead,
 )
+from app.core.config import get_book_margin
 from app.db.models import Game
 
 LOOKBACK_GAMES = 10
-BOOK_MARGIN = 0.14
+BOOK_MARGIN = get_book_margin()
 DEFAULT_MARGIN_SIGMA = 12.0
 DEFAULT_TOTAL_SIGMA = 18.0
 DEFAULT_HOME_EDGE = 2.5

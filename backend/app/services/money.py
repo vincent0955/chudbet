@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import math
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.parlay_schemas import ParlayCreate
 from app.db.enums import LedgerEntryType, WagerStatus
 from app.db.models import Account, LedgerEntry, Wager
+from app.parlay.pricing import PricingValidationError
 from app.parlay.service import create_parlay
 
 MAX_STAKE_CENTS = 500_000_00
@@ -15,6 +18,20 @@ MAX_STAKE_CENTS = 500_000_00
 
 class InsufficientBalanceError(Exception):
     """Raised when available balance is below the requested stake."""
+
+
+def _parlay_payout_decimal(parlay) -> float | None:
+    """Server-authoritative payout decimal odds for a priced parlay.
+
+    Reads ``metadata_json["payout_decimal_odds"]`` (written by ``create_parlay``)
+    and falls back to ``parlay.fair_decimal_odds`` when the metadata value is
+    absent. The client-supplied ``offered_decimal_odds`` is never consulted.
+    """
+    meta = parlay.metadata_json or {}
+    payout = meta.get("payout_decimal_odds")
+    if payout is None:
+        return parlay.fair_decimal_odds
+    return payout
 
 
 def create_account(session: Session, *, user_id: int | None = None) -> Account:
@@ -119,11 +136,13 @@ def place_wager(
         raise InsufficientBalanceError
 
     parlay = create_parlay(session, parlay_body)
-    odds = offered_decimal_odds if offered_decimal_odds is not None else parlay.fair_decimal_odds
-    if odds is None or odds <= 1:
-        raise ValueError("invalid_decimal_odds")
+    # Client-supplied ``offered_decimal_odds`` is intentionally ignored; the
+    # payout always comes from the server-priced parlay (Req 2.1, 2.2, 2.3).
+    payout = _parlay_payout_decimal(parlay)
+    if payout is None or payout <= 1:
+        raise PricingValidationError("ticket has no valid payout odds")
 
-    potential_return = int(round(float(stake_cents) * float(odds)))
+    potential_return = math.floor(float(stake_cents) * float(payout))
     new_balance = account.balance_cents - stake_cents
     account.balance_cents = new_balance
 
@@ -131,7 +150,7 @@ def place_wager(
         account_id=account.id,
         parlay_id=parlay.id,
         stake_cents=stake_cents,
-        offered_decimal_odds=float(odds),
+        offered_decimal_odds=float(payout),
         potential_return_cents=potential_return,
         status=WagerStatus.OPEN,
         idempotency_key=idempotency_key,

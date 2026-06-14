@@ -32,3 +32,35 @@ def get_cors_origins() -> list[str]:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+
+
+BOOK_MARGIN_DEFAULT = 0.14
+LINE_DRIFT_TOLERANCE_DEFAULT = 0.0
+
+
+@lru_cache
+def get_book_margin() -> float:
+    """
+    House book margin from CHUDBET_BOOK_MARGIN.
+    Falls back to 0.14 when unset, invalid, or negative.
+    """
+    raw = os.getenv("CHUDBET_BOOK_MARGIN", "").strip()
+    try:
+        value = float(raw) if raw else BOOK_MARGIN_DEFAULT
+    except ValueError:
+        value = BOOK_MARGIN_DEFAULT
+    return value if value >= 0 else BOOK_MARGIN_DEFAULT
+
+
+@lru_cache
+def get_line_drift_tolerance() -> float:
+    """
+    Maximum allowed absolute line drift from CHUDBET_LINE_DRIFT_TOLERANCE.
+    Falls back to 0.0 when unset, invalid, or negative.
+    """
+    raw = os.getenv("CHUDBET_LINE_DRIFT_TOLERANCE", "").strip()
+    try:
+        value = float(raw) if raw else LINE_DRIFT_TOLERANCE_DEFAULT
+    except ValueError:
+        value = LINE_DRIFT_TOLERANCE_DEFAULT
+    return value if value >= 0 else LINE_DRIFT_TOLERANCE_DEFAULT

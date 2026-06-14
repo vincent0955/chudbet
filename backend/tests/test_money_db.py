@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date
 
 import pytest
@@ -120,12 +121,14 @@ class TestPlaceWager:
         assert wager.status == WagerStatus.OPEN
         assert wager.stake_cents == 2_000
         assert updated.balance_cents == 8_000
-        assert wager.potential_return_cents == round(2_000 * wager.offered_decimal_odds)
+        assert wager.potential_return_cents == math.floor(2_000 * wager.offered_decimal_odds)
 
-    def test_uses_offered_odds_when_provided(self, session: Session) -> None:
+    def test_offered_odds_is_ignored_server_prices(self, session: Session) -> None:
         account = money.create_account(session)
         money.deposit(session, account.id, amount_cents=10_000)
         game = _seed_game(session)
+        # The client sends an absurd 3.0; the server must ignore it and price
+        # the wager from server-authoritative odds (this is the closed exploit).
         wager, _, _ = money.place_wager(
             session,
             account.id,
@@ -133,8 +136,23 @@ class TestPlaceWager:
             offered_decimal_odds=3.0,
             parlay_body=_moneyline_body(game.id),
         )
-        assert wager.offered_decimal_odds == 3.0
-        assert wager.potential_return_cents == 3_000
+        # Stored odds are the server payout, not the client's 3.0.
+        assert wager.offered_decimal_odds > 1.0
+        assert wager.potential_return_cents == math.floor(1_000 * wager.offered_decimal_odds)
+
+        # Placing the same ticket with NO client odds yields the identical
+        # server price, proving the client value never influenced pricing.
+        other = money.create_account(session)
+        money.deposit(session, other.id, amount_cents=10_000)
+        game2 = _seed_game(session, nba_game_id="0022000002")
+        wager2, _, _ = money.place_wager(
+            session,
+            other.id,
+            stake_cents=1_000,
+            offered_decimal_odds=None,
+            parlay_body=_moneyline_body(game2.id),
+        )
+        assert wager.offered_decimal_odds == pytest.approx(wager2.offered_decimal_odds)
 
     def test_insufficient_balance_raises(self, session: Session) -> None:
         account = money.create_account(session)
@@ -215,7 +233,8 @@ class TestPlaceWager:
             )
 
 
-def _open_wager(session: Session, *, stake: int = 1_000, odds: float = 2.0) -> Wager:
+def _open_wager(session: Session, *, stake: int = 1_000) -> Wager:
+    """Place an OPEN moneyline wager. Odds are server-priced (client value ignored)."""
     account = money.create_account(session)
     money.deposit(session, account.id, amount_cents=10_000)
     game = _seed_game(session)
@@ -223,7 +242,7 @@ def _open_wager(session: Session, *, stake: int = 1_000, odds: float = 2.0) -> W
         session,
         account.id,
         stake_cents=stake,
-        offered_decimal_odds=odds,
+        offered_decimal_odds=None,
         parlay_body=_moneyline_body(game.id),
     )
     return wager
@@ -231,12 +250,12 @@ def _open_wager(session: Session, *, stake: int = 1_000, odds: float = 2.0) -> W
 
 class TestSettleWager:
     def test_win_credits_full_return(self, session: Session) -> None:
-        wager = _open_wager(session, stake=1_000, odds=2.0)
+        wager = _open_wager(session, stake=1_000)
         money.settle_wager_win(session, wager)
         assert wager.status == WagerStatus.WON
         account = session.get(money.Account, wager.account_id)
-        # 10_000 - 1_000 stake + 2_000 payout
-        assert account.balance_cents == 11_000
+        # 10_000 - 1_000 stake + server-priced potential return.
+        assert account.balance_cents == 10_000 - 1_000 + wager.potential_return_cents
         payout = session.scalar(
             select(LedgerEntry).where(
                 LedgerEntry.reference_id == wager.id,
@@ -244,17 +263,17 @@ class TestSettleWager:
             )
         )
         assert payout is not None
-        assert payout.amount_cents == 2_000
+        assert payout.amount_cents == wager.potential_return_cents
 
     def test_loss_keeps_balance_and_writes_no_credit(self, session: Session) -> None:
-        wager = _open_wager(session, stake=1_000, odds=2.0)
+        wager = _open_wager(session, stake=1_000)
         money.settle_wager_loss(session, wager)
         assert wager.status == WagerStatus.LOST
         account = session.get(money.Account, wager.account_id)
         assert account.balance_cents == 9_000
 
     def test_void_refunds_stake(self, session: Session) -> None:
-        wager = _open_wager(session, stake=1_000, odds=2.0)
+        wager = _open_wager(session, stake=1_000)
         money.settle_wager_void(session, wager)
         assert wager.status == WagerStatus.VOID
         account = session.get(money.Account, wager.account_id)
@@ -279,7 +298,7 @@ class TestSettleWager:
             money.settle_wager_void(session, wager)
 
     def test_ledger_balance_after_matches_account(self, session: Session) -> None:
-        wager = _open_wager(session, stake=2_500, odds=2.0)
+        wager = _open_wager(session, stake=2_500)
         money.settle_wager_win(session, wager)
         account = session.get(money.Account, wager.account_id)
         latest = session.scalar(

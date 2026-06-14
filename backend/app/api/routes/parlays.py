@@ -6,6 +6,7 @@ from app.api.parlay_schemas import ParlayCreate, ParlayRead
 from app.db.models import Parlay
 from app.db.session import get_db
 from app.parlay.display import parlay_detail_load_options, parlay_read_with_leg_display
+from app.parlay.pricing import PricingError
 from app.parlay.service import create_parlay
 
 router = APIRouter(tags=["parlays"])
@@ -17,6 +18,9 @@ def post_parlay(body: ParlayCreate, db: Session = Depends(get_db)) -> ParlayRead
         parlay = create_parlay(db, body)
         parlay_id = parlay.id
         db.commit()
+    except PricingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
