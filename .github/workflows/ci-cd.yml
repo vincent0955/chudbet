@@ -74,7 +74,7 @@ jobs:
         # playwright.config.ts starts the Vite server itself (reuseExistingServer is off in CI).
         run: npm run test:e2e
       - name: Upload Playwright report
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
