@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.enums import Sport
 
 if TYPE_CHECKING:
     from app.db.models.parlay_leg import ParlayLeg
@@ -17,6 +19,26 @@ if TYPE_CHECKING:
 class Game(Base):
     __tablename__ = "games"
 
+    __table_args__ = (
+        Index(
+            "uq_games_nba_id",
+            "nba_game_id",
+            unique=True,
+            postgresql_where=text("nba_game_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_games_mlb_id",
+            "mlb_game_id",
+            unique=True,
+            postgresql_where=text("mlb_game_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "(sport = 'NBA' AND nba_game_id IS NOT NULL AND mlb_game_id IS NULL) "
+            "OR (sport = 'MLB' AND mlb_game_id IS NOT NULL AND nba_game_id IS NULL)",
+            name="ck_games_sport_native_id",
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     home_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     away_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
@@ -25,10 +47,19 @@ class Game(Base):
     home_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     away_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
-    nba_game_id: Mapped[str] = mapped_column(
-        String(16),
-        unique=True,
+    sport: Mapped[Sport] = mapped_column(
+        SQLEnum(Sport, name="sport", native_enum=False, length=8),
         nullable=False,
+        server_default=Sport.NBA.value,
+    )
+    nba_game_id: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+        index=True,
+    )
+    mlb_game_id: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
         index=True,
     )
 

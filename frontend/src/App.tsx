@@ -4,6 +4,8 @@ import { WalletProvider } from './context/WalletContext'
 import { AppLayout } from './layouts/AppLayout'
 import { GameDetailPage } from './pages/GameDetailPage'
 import { HomePage } from './pages/HomePage'
+import { MLBGameDetailPage } from './pages/MLBGameDetailPage'
+import { MLBPage } from './pages/MLBPage'
 import { MyBetsPage } from './pages/MyBetsPage'
 import { ParlayDetailPage } from './pages/ParlayDetailPage'
 import { SignupPage } from './pages/SignupPage'
@@ -17,6 +19,8 @@ export default function App() {
           <Routes>
             <Route element={<AppLayout />}>
               <Route path="/" element={<HomePage />} />
+              <Route path="/mlb" element={<MLBPage />} />
+              <Route path="/mlb/games/:gameId" element={<MLBGameDetailPage />} />
               <Route path="/games/:gameId" element={<GameDetailPage />} />
               <Route path="/bets/open" element={<MyBetsPage />} />
               <Route path="/bets/settled" element={<MyBetsPage />} />

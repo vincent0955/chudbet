@@ -3,6 +3,11 @@
 from enum import StrEnum
 
 
+class Sport(StrEnum):
+    NBA = "NBA"
+    MLB = "MLB"
+
+
 class ParlayMode(StrEnum):
     STANDARD = "standard"
     X_OF_Y = "x_of_y"

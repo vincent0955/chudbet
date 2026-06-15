@@ -24,7 +24,12 @@ export interface GameRead {
   home_score?: number | null
   away_score?: number | null
   status: string
-  nba_game_id: string
+  /** Discriminator: 'NBA' or 'MLB'. Optional for backward compatibility. */
+  sport?: string | null
+  /** Present for NBA games; null for MLB games. */
+  nba_game_id?: string | null
+  /** Present for MLB games; null for NBA games. */
+  mlb_game_id?: string | null
 }
 
 export interface PlayerGameStatRead {
@@ -91,9 +96,72 @@ export interface GameMarketsRead {
   }
 }
 
+// --- MLB ---
+
+export interface MLBTeamRead {
+  id: number
+  name: string
+  mlb_team_id: number | null
+  abbreviation: string | null
+}
+
+export interface MLBPlayerRead {
+  id: number
+  full_name: string
+  team_id: number
+  mlb_player_id: number | null
+  primary_position: string | null
+}
+
+/** MLB game view (carries `mlb_game_id` instead of NBA's `nba_game_id`). */
+export interface MLBGameRead {
+  id: number
+  home_team_id: number
+  away_team_id: number
+  game_date: ISODateString
+  game_time_utc?: string | null
+  home_score?: number | null
+  away_score?: number | null
+  status: string
+  mlb_game_id: string | null
+}
+
+/** One offered MLB player-prop stat: line plus over/under American odds. */
+export interface MLBPropStatLineRead {
+  /** One of the MLBStatType values, e.g. 'HITS', 'STRIKEOUTS_PITCHER'. */
+  stat_type: MLBStatType
+  line: number
+  over_american: string
+  under_american: string
+}
+
+/** Per-player MLB prop lines for one game (only offered stats are included). */
+export interface MLBPlayerPropLinesRead {
+  id: number
+  full_name: string
+  team_id: number
+  team_name: string
+  mlb_team_id: number | null
+  mlb_player_id: number | null
+  primary_position: string | null
+  sample_size: number
+  stat_lines: MLBPropStatLineRead[]
+}
+
+export interface MLBGamePropLinesBundle {
+  game: MLBGameRead
+  lookback_days: number
+  min_samples: number
+  players: MLBPlayerPropLinesRead[]
+}
+
 export type ParlayMode = 'standard' | 'x_of_y'
 
 export type StatType = 'PTS' | 'REB' | 'AST'
+
+export type MLBStatType = 'HITS' | 'TOTAL_BASES' | 'RBI' | 'RUNS' | 'STRIKEOUTS_PITCHER'
+
+export type AnyStatType = StatType | MLBStatType
 
 export type LegDirection = 'OVER' | 'UNDER'
 export type GameMarketType = 'moneyline' | 'spread' | 'total'
@@ -104,7 +172,7 @@ export type ParlayLegOutcome = 'pending' | 'hit' | 'miss' | 'void'
 export interface LegIn {
   player_id: number
   game_id: number | null
-  stat_type: StatType
+  stat_type: AnyStatType
   line: number
   direction: LegDirection
 }

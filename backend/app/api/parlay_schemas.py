@@ -11,7 +11,7 @@ LegOutcomeUi = Literal["pending", "hit", "miss", "void"]
 class LegIn(BaseModel):
     player_id: int = Field(ge=1)
     game_id: int | None = None
-    stat_type: StatType
+    stat_type: str = Field(min_length=1, max_length=16)
     line: float = Field(ge=-5, lt=200)
     direction: LegDirection
 
@@ -83,7 +83,7 @@ class ParlayLegRead(BaseModel):
     player_nba_id: int | None = None
     player_team_nba_id: int | None = None
     game_id: int | None
-    stat_type: StatType
+    stat_type: str
     line: float
     direction: LegDirection
     leg_probability: float

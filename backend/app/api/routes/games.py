@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import GameMarketsRead, GamePropLinesBundle, GameRead
+from app.db.enums import Sport
 from app.db.models import Game
 from app.db.session import get_db
 from app.services.game_markets import build_game_markets
@@ -14,7 +15,7 @@ router = APIRouter(tags=["games"])
 @router.get("/games/{game_id}/prop-lines", response_model=GamePropLinesBundle)
 def get_game_prop_lines(game_id: int, db: Session = Depends(get_db)) -> GamePropLinesBundle:
     row = db.scalar(select(Game).where(Game.id == game_id))
-    if row is None:
+    if row is None or row.sport != Sport.NBA:
         raise HTTPException(status_code=404, detail="Game not found")
     return build_game_prop_lines_bundle(db, row)
 
@@ -22,7 +23,7 @@ def get_game_prop_lines(game_id: int, db: Session = Depends(get_db)) -> GameProp
 @router.get("/games/{game_id}/markets", response_model=GameMarketsRead)
 def get_game_markets(game_id: int, db: Session = Depends(get_db)) -> GameMarketsRead:
     row = db.scalar(select(Game).where(Game.id == game_id))
-    if row is None:
+    if row is None or row.sport != Sport.NBA:
         raise HTTPException(status_code=404, detail="Game not found")
     return build_game_markets(db, row)
 
@@ -30,7 +31,7 @@ def get_game_markets(game_id: int, db: Session = Depends(get_db)) -> GameMarkets
 @router.get("/games/{game_id}", response_model=GameRead)
 def get_game(game_id: int, db: Session = Depends(get_db)) -> GameRead:
     row = db.scalar(select(Game).where(Game.id == game_id))
-    if row is None:
+    if row is None or row.sport != Sport.NBA:
         raise HTTPException(status_code=404, detail="Game not found")
     return GameRead.model_validate(row)
 
@@ -43,6 +44,7 @@ def list_games(
 ) -> list[GameRead]:
     stmt = (
         select(Game)
+        .where(Game.sport == Sport.NBA)
         .order_by(Game.game_date.desc(), Game.id.desc())
         .limit(limit)
         .offset(offset)

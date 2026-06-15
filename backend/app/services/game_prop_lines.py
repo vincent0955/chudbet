@@ -9,12 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import GamePropLinesBundle, GameRead, PlayerPropLinesRead
-from app.core.config import get_book_margin
 from app.db.models import Game, Player, PlayerGameStat, Team
+from app.services.odds_math import (
+    american_from_probability,
+    apply_two_way_margin_balanced,
+    normal_cdf,
+)
 
 GAME_PROP_LOOKBACK = 10
 GAME_PROP_MIN_SAMPLES = 3
-BOOK_MARGIN = get_book_margin()
 
 
 def _half_point_line(values: list[int]) -> float | None:
@@ -23,51 +26,6 @@ def _half_point_line(values: list[int]) -> float | None:
         return None
     avg = sum(values) / len(values)
     return float(round(avg - 0.5) + 0.5)
-
-
-def _normal_cdf(x: float, mean: float, stddev: float) -> float:
-    z = (x - mean) / (stddev * math.sqrt(2.0))
-    return 0.5 * (1.0 + math.erf(z))
-
-
-def _american_from_probability(p: float) -> str:
-    if p <= 0.0:
-        return "+10000"
-    if p >= 1.0:
-        return "-10000"
-    if p >= 0.5:
-        odds = -100.0 * p / (1.0 - p)
-    else:
-        odds = 100.0 * (1.0 - p) / p
-    rounded = int(round(odds))
-    return f"+{rounded}" if rounded > 0 else str(rounded)
-
-
-def _apply_two_way_margin(p_over_fair: float, margin: float = BOOK_MARGIN) -> tuple[float, float]:
-    """
-    Apply house margin to a fair two-way market.
-
-    Margin system is calibrated so with `margin=0.14`, a 50/50 market prices to -114/-114.
-    """
-    # Overround multiplier; for 0.14 this is 1.06542056... => 0.53271028 each on coinflip.
-    overround = 1.0 + (margin / (2.0 + margin))
-    p_over = p_over_fair * overround
-    p_under = (1.0 - p_over_fair) * overround
-
-    # Guardrails for extreme tails.
-    max_side = 0.999
-    min_side = 0.001
-    if p_over >= max_side:
-        p_over = max_side
-        p_under = max(min_side, min(max_side, overround - p_over))
-    elif p_under >= max_side:
-        p_under = max_side
-        p_over = max(min_side, min(max_side, overround - p_under))
-    else:
-        p_over = max(min_side, p_over)
-        p_under = max(min_side, p_under)
-
-    return (p_over, p_under)
 
 
 def _american_odds_pair_from_history(values: list[int], line: float | None) -> tuple[str, str]:
@@ -83,10 +41,10 @@ def _american_odds_pair_from_history(values: list[int], line: float | None) -> t
     stddev = max(stddev, 1.0)
 
     # For half-point lines there is no push; use strict over probability.
-    p_over = 1.0 - _normal_cdf(line, mean, stddev)
+    p_over = 1.0 - normal_cdf(line, mean, stddev)
     p_over = min(max(p_over, 0.02), 0.98)
-    p_over, p_under = _apply_two_way_margin(p_over)
-    return (_american_from_probability(p_over), _american_from_probability(p_under))
+    p_over, p_under = apply_two_way_margin_balanced(p_over)
+    return (american_from_probability(p_over), american_from_probability(p_under))
 
 
 def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle:

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { statusIndicatesLiveOrFinished } from './gameWagerGate'
+import {
+  classifyMlbStatus,
+  gameAcceptsPreGameWagers,
+  statusIndicatesLiveOrFinished,
+} from './gameWagerGate'
 
 describe('statusIndicatesLiveOrFinished', () => {
   it.each([
@@ -33,5 +37,32 @@ describe('statusIndicatesLiveOrFinished', () => {
     // Mirrors backend status_indicates_live_or_finished parity contract.
     expect(statusIndicatesLiveOrFinished('Q1 12:00')).toBe(true)
     expect(statusIndicatesLiveOrFinished('7:30 PM ET')).toBe(false)
+  })
+})
+
+describe('classifyMlbStatus', () => {
+  it.each(['Scheduled', 'Pre-Game', 'Warmup', ''])('treats %s as pre_game', (status) => {
+    expect(classifyMlbStatus(status)).toBe('pre_game')
+  })
+
+  it.each(['Final', 'Game Over'])('treats %s as final', (status) => {
+    expect(classifyMlbStatus(status)).toBe('final')
+  })
+
+  it('treats in-progress as live', () => {
+    expect(classifyMlbStatus('In Progress')).toBe('live')
+  })
+})
+
+describe('gameAcceptsPreGameWagers', () => {
+  it('opens MLB scheduled games and closes live/final', () => {
+    expect(gameAcceptsPreGameWagers({ sport: 'MLB', status: 'Scheduled' })).toBe(true)
+    expect(gameAcceptsPreGameWagers({ sport: 'MLB', status: 'In Progress' })).toBe(false)
+    expect(gameAcceptsPreGameWagers({ sport: 'MLB', status: 'Final' })).toBe(false)
+  })
+
+  it('keeps NBA heuristic behavior', () => {
+    expect(gameAcceptsPreGameWagers({ sport: 'NBA', status: '7:30 pm ET' })).toBe(true)
+    expect(gameAcceptsPreGameWagers({ sport: 'NBA', status: 'Q3 2:00' })).toBe(false)
   })
 })

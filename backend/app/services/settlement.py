@@ -3,13 +3,31 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from collections.abc import Callable
+from typing import Literal, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.enums import GameMarketType, GameSelection, LegDirection, ParlayMode, StatType, WagerStatus
-from app.db.models import Game, Parlay, ParlayGameLeg, ParlayLeg, PlayerGameStat, Wager
+from app.db.enums import (
+    GameMarketType,
+    GameSelection,
+    LegDirection,
+    ParlayMode,
+    Sport,
+    StatType,
+    WagerStatus,
+)
+from app.db.models import (
+    Game,
+    MLBPlayerGameStat,
+    Parlay,
+    ParlayGameLeg,
+    ParlayLeg,
+    PlayerGameStat,
+    Wager,
+)
+from app.mlb.enums import MLBStatType
 from app.services import money
 
 logger = logging.getLogger(__name__)
@@ -35,12 +53,71 @@ def _is_game_gradeable(game: Game) -> bool:
     return _is_final_status(game.status)
 
 
-def _stat_value(row: PlayerGameStat, st: StatType) -> int:
-    if st == StatType.PTS:
-        return row.points
-    if st == StatType.REB:
-        return row.rebounds
-    return row.assists
+class StatReader(Protocol):
+    """Resolve the reported value of a player-prop stat for a settled game.
+
+    Returns ``None`` when the value is not yet available (no stat row persisted),
+    which the caller treats as ``pending`` (Req 14.7).
+    """
+
+    def value(
+        self, session: Session, player_id: int, game_id: int, stat_type: str
+    ) -> int | None: ...
+
+
+class NbaStatReader:
+    """Read NBA player stats from ``PlayerGameStat`` (unchanged NBA path)."""
+
+    def value(
+        self, session: Session, player_id: int, game_id: int, stat_type: str
+    ) -> int | None:
+        row = session.scalar(
+            select(PlayerGameStat).where(
+                PlayerGameStat.player_id == player_id,
+                PlayerGameStat.game_id == game_id,
+            )
+        )
+        if row is None:
+            return None
+        st = StatType(stat_type)
+        if st == StatType.PTS:
+            return row.points
+        if st == StatType.REB:
+            return row.rebounds
+        return row.assists
+
+
+# Map each MLB stat vocabulary member to its ``MLBPlayerGameStat`` column.
+_MLB_STAT_COLUMNS: dict[MLBStatType, str] = {
+    MLBStatType.HITS: "hits",
+    MLBStatType.TOTAL_BASES: "total_bases",
+    MLBStatType.RBI: "rbi",
+    MLBStatType.RUNS: "runs",
+    MLBStatType.STRIKEOUTS_PITCHER: "strikeouts_pitcher",
+}
+
+
+class MlbStatReader:
+    """Read MLB player stats from ``MLBPlayerGameStat`` by ``MLBStatType``."""
+
+    def value(
+        self, session: Session, player_id: int, game_id: int, stat_type: str
+    ) -> int | None:
+        row = session.scalar(
+            select(MLBPlayerGameStat).where(
+                MLBPlayerGameStat.player_id == player_id,
+                MLBPlayerGameStat.game_id == game_id,
+            )
+        )
+        if row is None:
+            return None
+        return getattr(row, _MLB_STAT_COLUMNS[MLBStatType(stat_type)])
+
+
+STAT_READERS: dict[Sport, StatReader] = {
+    Sport.NBA: NbaStatReader(),
+    Sport.MLB: MlbStatReader(),
+}
 
 
 def _leg_stat_hit(value: float, line: float, direction: LegDirection) -> bool:
@@ -93,16 +170,11 @@ def _evaluate_leg(session: Session, leg: ParlayLeg) -> Literal["win", "loss", "v
         return "void"
     if not _is_game_gradeable(game):
         return "pending"
-    row = session.scalar(
-        select(PlayerGameStat).where(
-            PlayerGameStat.player_id == leg.player_id,
-            PlayerGameStat.game_id == leg.game_id,
-        )
-    )
-    if row is None:
+    reader = STAT_READERS[game.sport]
+    val = reader.value(session, leg.player_id, leg.game_id, leg.stat_type)
+    if val is None:
         return "pending"
-    val = float(_stat_value(row, leg.stat_type))
-    return "win" if _leg_stat_hit(val, float(leg.line), leg.direction) else "loss"
+    return "win" if _leg_stat_hit(float(val), float(leg.line), leg.direction) else "loss"
 
 
 def game_leg_ui_outcome(session: Session, leg: ParlayGameLeg) -> LegUiOutcome:
@@ -189,11 +261,45 @@ def _resolve_ticket(parlay: Parlay, leg_results: list[str]) -> Outcome:
     return "loss"
 
 
-def settle_open_wagers(session: Session) -> dict[str, int]:
-    """
-    Evaluate all OPEN wagers. Commits are left to the caller.
+def _ticket_game_sports(session: Session, wager: Wager) -> set[Sport]:
+    """Sports referenced by a wager's player-prop and game legs."""
+    parlay = wager.parlay
+    if parlay is None:
+        return set()
 
-    Returns counters for observability.
+    game_ids = {lg.game_id for lg in parlay.legs if lg.game_id is not None}
+    game_ids |= {gl.game_id for gl in parlay.game_legs if gl.game_id is not None}
+    if not game_ids:
+        return set()
+
+    sports = session.scalars(select(Game.sport).where(Game.id.in_(game_ids))).all()
+    return set(sports)
+
+
+def ticket_contains_mlb_leg(session: Session, wager: Wager) -> bool:
+    """True when any leg references an MLB game (Req 7.7, 15.1)."""
+    return Sport.MLB in _ticket_game_sports(session, wager)
+
+
+def ticket_is_pure_nba(session: Session, wager: Wager) -> bool:
+    """True when the ticket has no MLB legs (NBA worker scope)."""
+    return Sport.MLB not in _ticket_game_sports(session, wager)
+
+
+def settle_open_wagers(
+    session: Session,
+    *,
+    sport_scope: Callable[[Session, Wager], bool] | None = None,
+) -> dict[str, int]:
+    """
+    Evaluate OPEN wagers, optionally filtered by ``sport_scope``.
+
+    When ``sport_scope`` is provided, only wagers for which the predicate
+    returns ``True`` are graded. The NBA worker passes
+    :func:`ticket_is_pure_nba`; the MLB worker passes
+    :func:`ticket_contains_mlb_leg` (Req 7.7, 15.1).
+
+    Commits are left to the caller. Returns counters for observability.
     """
     counts: dict[str, int] = {
         "open_seen": 0,
@@ -202,6 +308,7 @@ def settle_open_wagers(session: Session) -> dict[str, int]:
         "lost": 0,
         "void": 0,
         "errors": 0,
+        "skipped_scope": 0,
     }
 
     wagers = session.scalars(
@@ -215,6 +322,9 @@ def settle_open_wagers(session: Session) -> dict[str, int]:
 
     for wager in wagers:
         counts["open_seen"] += 1
+        if sport_scope is not None and not sport_scope(session, wager):
+            counts["skipped_scope"] += 1
+            continue
         parlay = wager.parlay
         if parlay is None:
             counts["errors"] += 1

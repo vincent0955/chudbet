@@ -14,11 +14,21 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from app.core.config import get_book_margin, get_line_drift_tolerance
-from app.db.enums import GameMarketType, GameSelection, ParlayMode, StatType
+from app.db.enums import (
+    GameMarketType,
+    GameSelection,
+    LegDirection,
+    ParlayMode,
+    Sport,
+    StatType,
+)
 from app.db.models import Game
+from app.mlb.enums import MLBStatType
+from app.mlb.game_markets import build_mlb_game_markets
+from app.mlb.prop_lines import build_mlb_game_prop_lines_bundle
 from app.parlay.math import (
     fair_decimal_odds,
     joint_probability_standard,
@@ -34,6 +44,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from app.api.parlay_schemas import ParlayCreate
+    from app.api.schemas import GameMarketsRead
 
 # Tiny edge kept above an even-money payout so that, for any fair_decimal > 1,
 # the margined payout is always strictly greater than 1.0.
@@ -212,20 +223,18 @@ def authoritative_prop_quote(
     return float(line), over_american, under_american
 
 
-def authoritative_game_line(
-    session: "Session",
-    game: "Game",
+def _game_line_quote_from_markets(
+    markets: "GameMarketsRead",
     market_type: GameMarketType,
     selection: GameSelection,
 ) -> GameLineQuote | None:
-    """Authoritative quote for ``(game, market_type, selection)``.
+    """Parse a ``GameMarketsRead`` into a ``GameLineQuote`` for the selection.
 
-    Builds markets via ``build_game_markets`` and returns a ``GameLineQuote`` for
-    the requested selection, parsing American strings to ints. Returns ``None``
-    when the ``(market_type, selection)`` combination is unrecognized/mismatched.
+    Shared by the NBA and MLB pricers: both build the same ``GameMarketsRead``
+    shape (moneyline/spread/total) so the parsing logic is identical. Returns
+    ``None`` when the ``(market_type, selection)`` combination is
+    unrecognized/mismatched.
     """
-    markets = build_game_markets(session, game)
-
     if market_type == GameMarketType.MONEYLINE:
         ml = markets.moneyline
         home = _parse_american(ml.home_american)
@@ -265,6 +274,132 @@ def authoritative_game_line(
         return None
 
     return None
+
+
+def authoritative_game_line(
+    session: "Session",
+    game: "Game",
+    market_type: GameMarketType,
+    selection: GameSelection,
+) -> GameLineQuote | None:
+    """Authoritative quote for ``(game, market_type, selection)`` (NBA path).
+
+    Builds markets via ``build_game_markets`` and returns a ``GameLineQuote`` for
+    the requested selection, parsing American strings to ints. Returns ``None``
+    when the ``(market_type, selection)`` combination is unrecognized/mismatched.
+    """
+    markets = build_game_markets(session, game)
+    return _game_line_quote_from_markets(markets, market_type, selection)
+
+
+# --- Sport-aware pricer registry (Requirement 13) ---------------------------
+#
+# A single strategy boundary keyed by ``Sport`` so that ``price_ticket`` can
+# price NBA and MLB legs through one code path. The NBA pricer wraps the
+# existing ``authoritative_*`` functions unchanged so the NBA path stays
+# behaviorally identical (Req 15.3/15.4); the MLB pricer wraps the baseball
+# market/prop services and the ``MLBStatType`` vocabulary.
+
+_NBA_STAT_VALUES = frozenset(s.value for s in StatType)
+_MLB_STAT_VALUES = frozenset(s.value for s in MLBStatType)
+
+
+class SportPricer(Protocol):
+    """Per-sport authoritative pricing strategy used by :func:`price_ticket`."""
+
+    def game_line(
+        self,
+        session: "Session",
+        game: "Game",
+        market_type: GameMarketType,
+        selection: GameSelection,
+    ) -> GameLineQuote | None: ...
+
+    def prop_quote(
+        self,
+        session: "Session",
+        game: "Game",
+        player_id: int,
+        stat: object,
+    ) -> tuple[float, int, int] | None: ...
+
+    def stat_is_offered(self, stat: object) -> bool: ...
+
+
+class NbaPricer:
+    """NBA strategy delegating to the unchanged ``authoritative_*`` functions."""
+
+    def game_line(
+        self,
+        session: "Session",
+        game: "Game",
+        market_type: GameMarketType,
+        selection: GameSelection,
+    ) -> GameLineQuote | None:
+        return authoritative_game_line(session, game, market_type, selection)
+
+    def prop_quote(
+        self,
+        session: "Session",
+        game: "Game",
+        player_id: int,
+        stat: object,
+    ) -> tuple[float, int, int] | None:
+        try:
+            stat_type = stat if isinstance(stat, StatType) else StatType(str(stat))
+        except ValueError:
+            return None
+        return authoritative_prop_quote(session, game, player_id, stat_type)
+
+    def stat_is_offered(self, stat: object) -> bool:
+        return str(stat) in _NBA_STAT_VALUES
+
+
+class MlbPricer:
+    """MLB strategy wrapping the baseball market/prop services and vocabulary."""
+
+    def game_line(
+        self,
+        session: "Session",
+        game: "Game",
+        market_type: GameMarketType,
+        selection: GameSelection,
+    ) -> GameLineQuote | None:
+        markets = build_mlb_game_markets(session, game)
+        return _game_line_quote_from_markets(markets, market_type, selection)
+
+    def prop_quote(
+        self,
+        session: "Session",
+        game: "Game",
+        player_id: int,
+        stat: object,
+    ) -> tuple[float, int, int] | None:
+        try:
+            stat_type = stat if isinstance(stat, MLBStatType) else MLBStatType(str(stat))
+        except ValueError:
+            return None
+        bundle = build_mlb_game_prop_lines_bundle(session, game)
+        player = next((p for p in bundle.players if p.id == player_id), None)
+        if player is None:
+            return None
+        stat_line = next(
+            (s for s in player.stat_lines if str(s.stat_type) == stat_type.value), None
+        )
+        if stat_line is None:
+            return None
+        over_american = _parse_american(stat_line.over_american)
+        under_american = _parse_american(stat_line.under_american)
+        return float(stat_line.line), over_american, under_american
+
+    def stat_is_offered(self, stat: object) -> bool:
+        return str(stat) in _MLB_STAT_VALUES
+
+
+PRICER_REGISTRY: dict[Sport, SportPricer] = {
+    Sport.NBA: NbaPricer(),
+    Sport.MLB: MlbPricer(),
+}
 
 
 # Smallest probability epsilon used to keep derived leg/ticket probabilities
@@ -338,25 +473,45 @@ def price_ticket(session: "Session", body: "ParlayCreate") -> PricedTicket:
             raise PricingValidationError(f"player prop leg {index}: game {leg.game_id} not found")
         require_pre_game_game_for_wager(game)
 
-        auth_line = authoritative_prop_line(session, game, leg.player_id, leg.stat_type)
-        if auth_line is None:
+        pricer = PRICER_REGISTRY[game.sport or Sport.NBA]
+
+        # Validate the stat against the sport's prop vocabulary (Req 13.3). An
+        # MLB selection the sport does not offer is rejected as HTTP 400.
+        if not pricer.stat_is_offered(leg.stat_type):
+            raise PricingValidationError(
+                f"player prop leg {index}: stat type not offered for this sport"
+            )
+
+        quote = pricer.prop_quote(session, game, leg.player_id, leg.stat_type)
+        if quote is None:
             raise PricingValidationError(
                 f"player prop leg {index}: no line offered for this player/stat"
             )
+        auth_line, over_american, under_american = quote
 
         if abs(leg.line - auth_line) > tol:
             raise LineDriftError(
                 f"player prop leg {index}: line moved from {leg.line} to {auth_line}"
             )
 
-        series = fetch_stat_series(session, leg.player_id, leg.stat_type, body.lookback_games)
-        if len(series) < 2:
-            raise PricingValidationError(
-                f"player prop leg {index}: insufficient history "
-                f"({len(series)} games) to price this leg"
-            )
-        mu, sigma = sample_mean_std(series)
-        p = _clamp_open_unit(leg_win_probability(auth_line, mu, sigma, leg.direction))
+        if (game.sport or Sport.NBA) == Sport.NBA:
+            # NBA props derive the leg probability from the player's stat series
+            # via the normal approximation (unchanged path, Req 15.3/15.4).
+            series = fetch_stat_series(session, leg.player_id, leg.stat_type, body.lookback_games)
+            if len(series) < 2:
+                raise PricingValidationError(
+                    f"player prop leg {index}: insufficient history "
+                    f"({len(series)} games) to price this leg"
+                )
+            mu, sigma = sample_mean_std(series)
+            p = _clamp_open_unit(leg_win_probability(auth_line, mu, sigma, leg.direction))
+        else:
+            # MLB props devig the authoritative over/under American odds to a
+            # fair side probability; the single house margin is applied once at
+            # the ticket level (Req 13.2).
+            p_over, p_under = devig_two_way(over_american, under_american)
+            p = _clamp_open_unit(p_over if leg.direction == LegDirection.OVER else p_under)
+
         player_legs.append(PricedPlayerLeg(line=auth_line, probability=p))
 
     game_legs: list[PricedGameLeg] = []
@@ -366,7 +521,8 @@ def price_ticket(session: "Session", body: "ParlayCreate") -> PricedTicket:
             raise PricingValidationError(f"game leg {index}: game {leg.game_id} not found")
         require_pre_game_game_for_wager(game)
 
-        quote = authoritative_game_line(session, game, leg.market_type, leg.selection)
+        pricer = PRICER_REGISTRY[game.sport or Sport.NBA]
+        quote = pricer.game_line(session, game, leg.market_type, leg.selection)
         if quote is None:
             raise PricingValidationError(f"game leg {index}: selection not offered")
 

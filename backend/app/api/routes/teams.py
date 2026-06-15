@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import TeamRead
+from app.db.enums import Sport
 from app.db.models import Team
 from app.db.session import get_db
 
@@ -16,7 +17,11 @@ def list_teams(
     offset: int = Query(0, ge=0),
 ) -> list[TeamRead]:
     stmt = (
-        select(Team).order_by(Team.name.asc()).limit(limit).offset(offset)
+        select(Team)
+        .where(Team.sport == Sport.NBA)
+        .order_by(Team.name.asc())
+        .limit(limit)
+        .offset(offset)
     )
     rows = db.scalars(stmt).all()
     return [TeamRead.model_validate(r) for r in rows]

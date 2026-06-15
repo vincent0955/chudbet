@@ -62,5 +62,22 @@ services:
       postgres:
         condition: service_healthy
 
+  mlb-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker.mlb_main"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-chudbet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chudbet}
+      POSTGRES_DB: ${POSTGRES_DB:-chudbet}
+      MLB_WORKER_INGEST_INTERVAL_SEC: "300"
+      MLB_WORKER_SETTLE_INTERVAL_SEC: "300"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:

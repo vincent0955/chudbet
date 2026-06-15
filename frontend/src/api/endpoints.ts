@@ -10,6 +10,10 @@ import type {
   GamePropLinesBundle,
   GameRead,
   HealthResponse,
+  MLBGamePropLinesBundle,
+  MLBGameRead,
+  MLBPlayerRead,
+  MLBTeamRead,
   ParlayCreate,
   ParlayRead,
   PlayerGameStatRead,
@@ -101,6 +105,30 @@ export function getGamePropLines(gameId: number) {
 
 export function getGameMarkets(gameId: number) {
   return apiRequest<GameMarketsRead>(`/games/${gameId}/markets`)
+}
+
+// --- MLB ---
+
+export function listMlbTeams(options?: { limit?: number; offset?: number }) {
+  return apiRequest<MLBTeamRead[]>(`/mlb/teams${query({ limit: options?.limit, offset: options?.offset })}`)
+}
+
+export function listMlbPlayers(options?: { limit?: number; offset?: number }) {
+  return apiRequest<MLBPlayerRead[]>(
+    `/mlb/players${query({ limit: options?.limit, offset: options?.offset })}`,
+  )
+}
+
+export function listMlbGames(options?: { limit?: number; offset?: number }) {
+  return apiRequest<MLBGameRead[]>(`/mlb/games${query({ limit: options?.limit, offset: options?.offset })}`)
+}
+
+export function getMlbGameMarkets(gameId: number) {
+  return apiRequest<GameMarketsRead>(`/mlb/games/${gameId}/markets`)
+}
+
+export function getMlbGamePropLines(gameId: number) {
+  return apiRequest<MLBGamePropLinesBundle>(`/mlb/games/${gameId}/prop-lines`)
 }
 
 export function listPlayerStats(playerId: number, options?: { limit?: number; offset?: number }) {

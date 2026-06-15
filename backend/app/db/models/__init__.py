@@ -3,6 +3,7 @@
 from app.db.models.account import Account
 from app.db.models.game import Game
 from app.db.models.ledger_entry import LedgerEntry
+from app.db.models.mlb_player_game_stats import MLBPlayerGameStat
 from app.db.models.parlay import Parlay
 from app.db.models.parlay_game_leg import ParlayGameLeg
 from app.db.models.parlay_leg import ParlayLeg
@@ -17,6 +18,7 @@ __all__ = [
     "Account",
     "Game",
     "LedgerEntry",
+    "MLBPlayerGameStat",
     "Parlay",
     "ParlayGameLeg",
     "ParlayLeg",

@@ -4,6 +4,7 @@ import { HeaderWallet } from '../components/HeaderWallet'
 
 function showBetSlipPath(pathname: string): boolean {
   if (pathname === '/' || pathname === '') return true
+  if (pathname === '/mlb' || pathname.startsWith('/mlb/games/')) return true
   const parts = pathname.split('/').filter(Boolean)
   return parts.length === 2 && parts[0] === 'games'
 }
@@ -33,6 +34,14 @@ export function AppLayout() {
                 }
               >
                 Home
+              </NavLink>
+              <NavLink
+                to="/mlb"
+                className={({ isActive }) =>
+                  `app-nav__link${isActive ? ' app-nav__link--active' : ''}`
+                }
+              >
+                MLB
               </NavLink>
               <NavLink
                 to="/bets/open"

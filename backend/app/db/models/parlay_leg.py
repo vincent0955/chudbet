@@ -7,7 +7,7 @@ from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.enums import LegDirection, StatType
+from app.db.enums import LegDirection
 
 if TYPE_CHECKING:
     from app.db.models.game import Game
@@ -39,8 +39,8 @@ class ParlayLeg(Base):
         nullable=True,
         index=True,
     )
-    stat_type: Mapped[StatType] = mapped_column(
-        SQLEnum(StatType, name="parlay_leg_stat_type", native_enum=False, length=16),
+    stat_type: Mapped[str] = mapped_column(
+        String(16),
         nullable=False,
     )
     line: Mapped[float] = mapped_column(Float, nullable=False)

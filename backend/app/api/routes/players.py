@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import PlayerGameStatRead, PlayerRead
+from app.db.enums import Sport
 from app.db.models import Game, Player, PlayerGameStat
 from app.db.session import get_db
 
@@ -17,6 +18,7 @@ def list_players(
 ) -> list[PlayerRead]:
     stmt = (
         select(Player)
+        .where(Player.sport == Sport.NBA)
         .order_by(Player.full_name.asc())
         .limit(limit)
         .offset(offset)
@@ -33,7 +35,7 @@ def list_player_stats(
     offset: int = Query(0, ge=0),
 ) -> list[PlayerGameStatRead]:
     player = db.scalar(select(Player).where(Player.id == player_id))
-    if player is None:
+    if player is None or player.sport != Sport.NBA:
         raise HTTPException(status_code=404, detail="Player not found")
 
     stmt = (

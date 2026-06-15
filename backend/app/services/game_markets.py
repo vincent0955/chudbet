@@ -14,20 +14,18 @@ from app.api.schemas import (
     GameTotalMarketRead,
     GameRead,
 )
-from app.core.config import get_book_margin
 from app.db.models import Game
+from app.services.odds_math import (
+    american_from_probability,
+    apply_two_way_margin,
+    normal_cdf,
+)
 
 LOOKBACK_GAMES = 10
-BOOK_MARGIN = get_book_margin()
 DEFAULT_MARGIN_SIGMA = 12.0
 DEFAULT_TOTAL_SIGMA = 18.0
 DEFAULT_HOME_EDGE = 2.5
 DEFAULT_TOTAL = 222.5
-
-
-def _normal_cdf(x: float, mean: float, stddev: float) -> float:
-    z = (x - mean) / (stddev * math.sqrt(2.0))
-    return 0.5 * (1.0 + math.erf(z))
 
 
 def _sample_mean_std(values: list[float]) -> tuple[float, float]:
@@ -42,25 +40,6 @@ def _sample_mean_std(values: list[float]) -> tuple[float, float]:
 
 def _round_half(n: float) -> float:
     return float(round(n - 0.5) + 0.5)
-
-
-def _american_from_probability(p: float) -> str:
-    p = min(max(p, 0.001), 0.999)
-    if p >= 0.5:
-        odds = -100.0 * p / (1.0 - p)
-    else:
-        odds = 100.0 * (1.0 - p) / p
-    rounded = int(round(odds))
-    return f"+{rounded}" if rounded > 0 else str(rounded)
-
-
-def _apply_two_way_margin(p_a_fair: float, margin: float = BOOK_MARGIN) -> tuple[float, float]:
-    overround = 1.0 + (margin / (2.0 + margin))
-    p_a = p_a_fair * overround
-    p_b = (1.0 - p_a_fair) * overround
-    p_a = min(max(p_a, 0.001), 0.999)
-    p_b = min(max(p_b, 0.001), 0.999)
-    return p_a, p_b
 
 
 def _team_score_history(session: Session, team_id: int, before_date) -> tuple[list[float], list[float]]:
@@ -112,14 +91,14 @@ def build_game_markets(session: Session, game: Game) -> GameMarketsRead:
     spread_home_line = _round_half(-proj_margin)
     total_line = _round_half(proj_total)
 
-    p_home_ml_fair = 1.0 - _normal_cdf(0.0, proj_margin, margin_sigma)
-    p_home_ml, p_away_ml = _apply_two_way_margin(min(max(p_home_ml_fair, 0.02), 0.98))
+    p_home_ml_fair = 1.0 - normal_cdf(0.0, proj_margin, margin_sigma)
+    p_home_ml, p_away_ml = apply_two_way_margin(min(max(p_home_ml_fair, 0.02), 0.98))
 
-    p_home_spread_fair = 1.0 - _normal_cdf(-spread_home_line, proj_margin, margin_sigma)
-    p_home_spread, p_away_spread = _apply_two_way_margin(min(max(p_home_spread_fair, 0.02), 0.98))
+    p_home_spread_fair = 1.0 - normal_cdf(-spread_home_line, proj_margin, margin_sigma)
+    p_home_spread, p_away_spread = apply_two_way_margin(min(max(p_home_spread_fair, 0.02), 0.98))
 
-    p_over_fair = 1.0 - _normal_cdf(total_line, proj_total, total_sigma)
-    p_over, p_under = _apply_two_way_margin(min(max(p_over_fair, 0.02), 0.98))
+    p_over_fair = 1.0 - normal_cdf(total_line, proj_total, total_sigma)
+    p_over, p_under = apply_two_way_margin(min(max(p_over_fair, 0.02), 0.98))
 
     return GameMarketsRead(
         game=GameRead.model_validate(game),
@@ -127,19 +106,19 @@ def build_game_markets(session: Session, game: Game) -> GameMarketsRead:
         sample_games_home=len(home_for),
         sample_games_away=len(away_for),
         moneyline=GameMoneylineMarketRead(
-            home_american=_american_from_probability(p_home_ml),
-            away_american=_american_from_probability(p_away_ml),
+            home_american=american_from_probability(p_home_ml),
+            away_american=american_from_probability(p_away_ml),
         ),
         spread=GameSpreadMarketRead(
             home_line=spread_home_line,
-            home_american=_american_from_probability(p_home_spread),
+            home_american=american_from_probability(p_home_spread),
             away_line=-spread_home_line,
-            away_american=_american_from_probability(p_away_spread),
+            away_american=american_from_probability(p_away_spread),
         ),
         total=GameTotalMarketRead(
             line=total_line,
-            over_american=_american_from_probability(p_over),
-            under_american=_american_from_probability(p_under),
+            over_american=american_from_probability(p_over),
+            under_american=american_from_probability(p_under),
         ),
     )
 

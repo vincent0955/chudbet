@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 
+from app.db.enums import Sport
 from app.db.models import Game
+from app.mlb.status import MLBGameStatus, classify_status
 
 _ORDINAL_QTR = re.compile(r"\b(?:1ST|2ND|3RD|4TH)\s+QTR\b", re.IGNORECASE)
 _SHORT_QTR = re.compile(r"\bQ\s*[1-4]\b", re.IGNORECASE)
@@ -33,9 +35,17 @@ def status_indicates_live_or_finished(status: str | None) -> bool:
 
 
 def game_accepts_pre_game_wagers(game: Game | None) -> bool:
-    """Allow new slips only before any live/quarter/overtime/halftime terminal state."""
+    """Allow new slips only before a game goes live or finishes.
+
+    Sport-aware: MLB games use :func:`classify_status` (``PRE_GAME`` ⇒ open;
+    ``LIVE``/``FINAL`` ⇒ closed) against the raw status text persisted on
+    ``Game.status``. NBA (and any non-MLB) games keep the existing
+    ``gameStatusText`` heuristics unchanged.
+    """
     if game is None:
         return True
+    if game.sport == Sport.MLB:
+        return classify_status(None, game.status) is MLBGameStatus.PRE_GAME
     return not status_indicates_live_or_finished(game.status)
 
 

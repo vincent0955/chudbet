@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import accounts, auth, db_test, games, health, parlays, players, teams
+from app.api.routes import accounts, auth, db_test, games, health, mlb, parlays, players, teams
 from app.core.config import get_cors_origins
 from app.db import models  # noqa: F401 — register models before create_all
 from app.db.base import Base
@@ -43,6 +43,7 @@ app.include_router(db_test.router)
 app.include_router(teams.router)
 app.include_router(players.router)
 app.include_router(games.router)
+app.include_router(mlb.router)
 app.include_router(parlays.router)
 app.include_router(accounts.router)
 app.include_router(auth.router)
