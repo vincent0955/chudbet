@@ -6,10 +6,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.parlay_schemas import ParlayGameLegRead, ParlayLegRead, ParlayRead
-from app.db.enums import StatType
-from app.db.models import Game, Parlay, ParlayGameLeg, ParlayLeg, Player, PlayerGameStat
-from app.db.enums import WagerStatus
+from app.db.enums import Sport, StatType, WagerStatus
+from app.db.models import Game, MLBPlayerGameStat, Parlay, ParlayGameLeg, ParlayLeg, Player, PlayerGameStat
+from app.mlb.enums import MLBStatType
 from app.services.settlement import game_leg_ui_outcome, leg_ui_outcome
+
+_MLB_STAT_COLUMNS: dict[MLBStatType, str] = {
+    MLBStatType.HITS: "hits",
+    MLBStatType.TOTAL_BASES: "total_bases",
+    MLBStatType.RBI: "rbi",
+    MLBStatType.RUNS: "runs",
+    MLBStatType.STRIKEOUTS_PITCHER: "strikeouts_pitcher",
+}
 
 
 def parlay_detail_load_options():
@@ -26,19 +34,39 @@ def parlay_detail_load_options():
 
 def parlay_read_with_leg_display(session: Session, parlay: Parlay) -> ParlayRead:
     """Sorted legs with `outcome` + optional `player_full_name` when relationships are loaded."""
-    stat_rows = session.scalars(
+    leg_game_ids = [lg.game_id for lg in parlay.legs if lg.game_id is not None]
+    leg_player_ids = [lg.player_id for lg in parlay.legs]
+    nba_stat_rows = session.scalars(
         select(PlayerGameStat).where(
             PlayerGameStat.game_id.is_not(None),
-            PlayerGameStat.game_id.in_([lg.game_id for lg in parlay.legs if lg.game_id is not None]),
-            PlayerGameStat.player_id.in_([lg.player_id for lg in parlay.legs]),
+            PlayerGameStat.game_id.in_(leg_game_ids),
+            PlayerGameStat.player_id.in_(leg_player_ids),
         )
     ).all()
-    stat_by_leg_key = {(s.player_id, s.game_id): s for s in stat_rows}
+    nba_stat_by_leg_key = {(s.player_id, s.game_id): s for s in nba_stat_rows}
+    mlb_stat_rows = session.scalars(
+        select(MLBPlayerGameStat).where(
+            MLBPlayerGameStat.game_id.in_(leg_game_ids),
+            MLBPlayerGameStat.player_id.in_(leg_player_ids),
+        )
+    ).all()
+    mlb_stat_by_leg_key = {(s.player_id, s.game_id): s for s in mlb_stat_rows}
 
     def _leg_stat_value(leg: ParlayLeg) -> float | None:
         if leg.game_id is None:
             return None
-        row = stat_by_leg_key.get((leg.player_id, leg.game_id))
+        key = (leg.player_id, leg.game_id)
+        sport = leg.game.sport if leg.game is not None else Sport.NBA
+        if sport == Sport.MLB:
+            row = mlb_stat_by_leg_key.get(key)
+            if row is None:
+                return None
+            try:
+                column = _MLB_STAT_COLUMNS[MLBStatType(leg.stat_type)]
+            except ValueError:
+                return None
+            return float(getattr(row, column))
+        row = nba_stat_by_leg_key.get(key)
         if row is None:
             return None
         if leg.stat_type == StatType.PTS:
@@ -64,6 +92,10 @@ def parlay_read_with_leg_display(session: Session, parlay: Parlay) -> ParlayRead
                 "player_full_name": pname,
                 "player_nba_id": leg.player.nba_player_id if leg.player is not None else None,
                 "player_team_nba_id": leg.player.team.nba_team_id
+                if leg.player is not None and leg.player.team is not None
+                else None,
+                "player_mlb_id": leg.player.mlb_player_id if leg.player is not None else None,
+                "player_team_mlb_id": leg.player.team.mlb_team_id
                 if leg.player is not None and leg.player.team is not None
                 else None,
                 "game_label": glabel,

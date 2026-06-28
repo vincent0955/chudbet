@@ -211,6 +211,8 @@ export interface ParlayLegRead {
   player_id: number
   player_nba_id?: number | null
   player_team_nba_id?: number | null
+  player_mlb_id?: number | null
+  player_team_mlb_id?: number | null
   game_id: number | null
   stat_type: StatType
   line: number

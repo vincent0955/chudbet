@@ -82,6 +82,8 @@ class ParlayLegRead(BaseModel):
     player_id: int
     player_nba_id: int | None = None
     player_team_nba_id: int | None = None
+    player_mlb_id: int | None = None
+    player_team_mlb_id: int | None = None
     game_id: int | None
     stat_type: str
     line: float

@@ -14,7 +14,7 @@ import { formatHalfPointLine } from '../components/browse/format'
 import { formatGameDate, formatTipOrGameStatusLabel } from '../components/browse/format'
 import { useWallet } from '../context/WalletContext'
 import { formatUsdFromCents } from '../lib/formatMoney'
-import { nbaPlayerHeadshotUrl, nbaTeamLogoUrl } from '../lib/nbaMedia'
+import { parlayLegPlayerHeadshotUrl, parlayLegPlayerTeamLogoUrl } from '../lib/parlayMedia'
 import { decimalToAmerican, formatAmericanOdds } from '../utils/parlayOdds'
 
 function statusLabel(s: WagerStatus): string {
@@ -191,8 +191,8 @@ function groupedLegs(detail: WagerDetailResponse): GroupedGame[] {
       direction: leg.direction,
       line: leg.line,
       statValue: leg.stat_value,
-      playerImageUrl: nbaPlayerHeadshotUrl(leg.player_nba_id),
-      playerTeamLogoUrl: nbaTeamLogoUrl(leg.player_team_nba_id),
+      playerImageUrl: parlayLegPlayerHeadshotUrl(leg),
+      playerTeamLogoUrl: parlayLegPlayerTeamLogoUrl(leg),
     }, leg.game_date, leg.game_time_utc, leg.game_status)
   }
   for (const leg of [...(detail.parlay.game_legs ?? [])].sort((a, b) => a.sort_order - b.sort_order)) {

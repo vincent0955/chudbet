@@ -4,7 +4,7 @@ import { ApiError, getParlay } from '../api'
 import type { ParlayGameLegRead, ParlayLegOutcome, ParlayLegRead, ParlayRead } from '../api/types'
 import { formatHalfPointLine } from '../components/browse/format'
 import { formatUsdFromCents } from '../lib/formatMoney'
-import { nbaPlayerHeadshotUrl, nbaTeamLogoUrl } from '../lib/nbaMedia'
+import { parlayLegPlayerHeadshotUrl, parlayLegPlayerTeamLogoUrl } from '../lib/parlayMedia'
 import { decimalToAmerican, formatAmericanOdds } from '../utils/parlayOdds'
 
 function legOutcomeLabel(o: ParlayLegOutcome | null | undefined): string {
@@ -177,8 +177,8 @@ function buildGroups(p: ParlayRead): Group[] {
       direction: leg.direction,
       line: leg.line,
       statValue: leg.stat_value,
-      playerImageUrl: nbaPlayerHeadshotUrl(leg.player_nba_id),
-      playerTeamLogoUrl: nbaTeamLogoUrl(leg.player_team_nba_id),
+      playerImageUrl: parlayLegPlayerHeadshotUrl(leg),
+      playerTeamLogoUrl: parlayLegPlayerTeamLogoUrl(leg),
     }, leg.game_status)
   }
   for (const leg of [...(p.game_legs ?? [])].sort((a, b) => a.sort_order - b.sort_order)) {
