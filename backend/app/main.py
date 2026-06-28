@@ -7,8 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import accounts, auth, db_test, games, health, mlb, parlays, players, teams
 from app.core.config import get_cors_origins
 from app.db import models  # noqa: F401 — register models before create_all
-from app.db.base import Base
-from app.db.migrate import ensure_postgres_schema
+from app.db.bootstrap import prepare_database_engine
 from app.db.seed_demo import seed_demo_wallet_if_enabled
 from app.db.session import check_db_connection, get_engine
 
@@ -18,8 +17,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
-    ensure_postgres_schema(engine)
+    prepare_database_engine(engine)
     if check_db_connection():
         logger.info("Database connection ready")
         seed_demo_wallet_if_enabled()

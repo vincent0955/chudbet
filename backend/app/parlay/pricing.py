@@ -321,6 +321,7 @@ class SportPricer(Protocol):
         game: "Game",
         player_id: int,
         stat: object,
+        requested_line: float,
     ) -> tuple[float, int, int] | None: ...
 
     def stat_is_offered(self, stat: object) -> bool: ...
@@ -344,7 +345,10 @@ class NbaPricer:
         game: "Game",
         player_id: int,
         stat: object,
+        requested_line: float,
     ) -> tuple[float, int, int] | None:
+        # NBA props expose a single authoritative line per stat, so the client's
+        # requested line is validated by the drift check, not used for lookup.
         try:
             stat_type = stat if isinstance(stat, StatType) else StatType(str(stat))
         except ValueError:
@@ -374,7 +378,13 @@ class MlbPricer:
         game: "Game",
         player_id: int,
         stat: object,
+        requested_line: float,
     ) -> tuple[float, int, int] | None:
+        # MLB props are an "N-or-more" milestone ladder, so a stat exposes
+        # several lines (0.5/1.5/2.5 for 1+/2+/3+). The client's requested line
+        # selects which milestone is being priced; the "N+" (yes) side and its
+        # complement are returned so ``price_ticket`` can de-vig the two-way
+        # market exactly as for any other two-way prop.
         try:
             stat_type = stat if isinstance(stat, MLBStatType) else MLBStatType(str(stat))
         except ValueError:
@@ -388,9 +398,15 @@ class MlbPricer:
         )
         if stat_line is None:
             return None
-        over_american = _parse_american(stat_line.over_american)
-        under_american = _parse_american(stat_line.under_american)
-        return float(stat_line.line), over_american, under_american
+        milestone = next(
+            (t for t in stat_line.thresholds if abs(t.line - requested_line) <= 1e-9),
+            None,
+        )
+        if milestone is None:
+            return None
+        yes_american = _parse_american(milestone.american)
+        no_american = _parse_american(milestone.under_american)
+        return float(milestone.line), yes_american, no_american
 
     def stat_is_offered(self, stat: object) -> bool:
         return str(stat) in _MLB_STAT_VALUES
@@ -482,7 +498,7 @@ def price_ticket(session: "Session", body: "ParlayCreate") -> PricedTicket:
                 f"player prop leg {index}: stat type not offered for this sport"
             )
 
-        quote = pricer.prop_quote(session, game, leg.player_id, leg.stat_type)
+        quote = pricer.prop_quote(session, game, leg.player_id, leg.stat_type, leg.line)
         if quote is None:
             raise PricingValidationError(
                 f"player prop leg {index}: no line offered for this player/stat"

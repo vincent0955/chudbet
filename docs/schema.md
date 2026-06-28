@@ -1,23 +1,34 @@
 # Database schema
 
+PostgreSQL tables shared across sports. Each sport-scoped row carries a `sport`
+column (`NBA` or `MLB`) and exactly one native external ID (`nba_*` or `mlb_*`).
+
 ```mermaid
 erDiagram
     teams {
         integer id PK
-        integer nba_team_id UK "NOT NULL, indexed"
+        varchar sport "NOT NULL NBA|MLB default NBA"
+        integer nba_team_id "nullable, partial unique when set"
+        integer mlb_team_id "nullable, partial unique when set"
         varchar name "NOT NULL, len 255"
+        varchar abbreviation "nullable, len 16"
     }
 
     players {
         integer id PK
-        integer nba_player_id UK "NOT NULL, indexed"
+        varchar sport "NOT NULL NBA|MLB default NBA"
+        integer nba_player_id "nullable, partial unique when set"
+        integer mlb_player_id "nullable, partial unique when set"
         varchar full_name "NOT NULL, len 255"
         integer team_id FK "NOT NULL"
+        varchar primary_position "nullable, len 32"
     }
 
     games {
         integer id PK
-        varchar nba_game_id UK "NOT NULL, len 16, indexed"
+        varchar sport "NOT NULL NBA|MLB default NBA"
+        varchar nba_game_id "nullable, len 16, partial unique when set"
+        varchar mlb_game_id "nullable, len 16, partial unique when set"
         integer home_team_id FK "NOT NULL"
         integer away_team_id FK "NOT NULL"
         date game_date "NOT NULL"
@@ -35,6 +46,17 @@ erDiagram
         integer rebounds "NOT NULL, default 0"
         integer assists "NOT NULL, default 0"
         float minutes "NOT NULL, default 0.0"
+    }
+
+    mlb_player_game_stats {
+        integer id PK
+        integer player_id FK "NOT NULL, indexed"
+        integer game_id FK "NOT NULL, indexed"
+        integer hits "NOT NULL, default 0, CHECK >= 0"
+        integer total_bases "NOT NULL, default 0, CHECK >= 0"
+        integer rbi "NOT NULL, default 0, CHECK >= 0"
+        integer runs "NOT NULL, default 0, CHECK >= 0"
+        integer strikeouts_pitcher "NOT NULL, default 0, CHECK >= 0"
     }
 
     accounts {
@@ -105,7 +127,7 @@ erDiagram
         integer parlay_id FK "NOT NULL, indexed, CASCADE"
         integer player_id FK "NOT NULL, indexed"
         integer game_id FK "nullable, indexed"
-        varchar stat_type "NOT NULL PTS|REB|AST"
+        varchar stat_type "NOT NULL see Player props below"
         float line "NOT NULL"
         varchar direction "NOT NULL OVER|UNDER"
         float leg_probability "NOT NULL"
@@ -129,8 +151,10 @@ erDiagram
     teams ||--o{ players : "has"
     teams ||--o{ games : "home_team"
     teams ||--o{ games : "away_team"
-    players ||--o{ player_game_stats : "stats"
-    games ||--o{ player_game_stats : "stats"
+    players ||--o{ player_game_stats : "nba_stats"
+    games ||--o{ player_game_stats : "nba_stats"
+    players ||--o{ mlb_player_game_stats : "mlb_stats"
+    games ||--o{ mlb_player_game_stats : "mlb_stats"
     users ||--o{ accounts : "owns_wallets"
     users ||--o{ user_sessions : "has_sessions"
     accounts ||--o{ ledger_entries : "journal"
@@ -143,7 +167,71 @@ erDiagram
     games ||--o{ parlay_game_legs : "market_game"
 ```
 
+## Sport scoping
 
+| Table   | Constraint |
+|---------|------------|
+| `teams` | `sport = 'NBA'` requires `nba_team_id` and forbids `mlb_team_id`; `sport = 'MLB'` is the mirror. |
+| `players` | Same pattern with `nba_player_id` / `mlb_player_id`. |
+| `games` | Same pattern with `nba_game_id` / `mlb_game_id`. |
 
+Box-score stats are split by sport:
 
+- **NBA** — `player_game_stats` (`points`, `rebounds`, `assists`, `minutes`)
+- **MLB** — `mlb_player_game_stats` (`hits`, `total_bases`, `rbi`, `runs`, `strikeouts_pitcher`)
 
+Settlement reads the appropriate table based on `games.sport`.
+
+## Player props
+
+### `parlay_legs` encoding
+
+Both sports persist player-prop legs in `parlay_legs`. The `stat_type`, `line`, and
+`direction` columns are interpreted by the sport of the referenced `game_id`.
+
+| Sport | `stat_type` values | Market shape |
+|-------|-------------------|--------------|
+| NBA | `PTS`, `REB`, `AST` | Single half-point over/under line (e.g. `24.5` OVER / UNDER) |
+| MLB | `HITS`, `TOTAL_BASES`, `RBI`, `RUNS`, `STRIKEOUTS_PITCHER` | **Milestone ladder** — see below |
+
+MLB milestone picks are stored as **`direction = OVER`** with **`line = threshold − 0.5`**
+so existing settlement (`actual > line`) grades “N or more” correctly:
+
+| User-facing pick | `line` | `direction` | Grades as |
+|------------------|--------|-------------|-----------|
+| 1+ hits | `0.5` | `OVER` | `hits >= 1` |
+| 2+ hits | `1.5` | `OVER` | `hits >= 2` |
+| 3+ hits | `2.5` | `OVER` | `hits >= 3` |
+
+The `UNDER` direction remains valid in the schema but is not offered in the MLB UI;
+NBA continues to use both sides.
+
+### MLB prop API (`GET /mlb/games/{id}/props`)
+
+Not stored in the database — computed at request time from rolling
+`mlb_player_game_stats` — but returned as:
+
+```
+MLBGamePropLinesBundle
+├── game: MLBGameRead
+├── lookback_days: int
+├── min_samples: int
+└── players: MLBPlayerPropLinesRead[]
+    ├── id, full_name, team_id, team_name, …
+    ├── sample_size: int
+    └── stat_lines: MLBPropStatLineRead[]
+        ├── stat_type: HITS | TOTAL_BASES | RBI | RUNS | STRIKEOUTS_PITCHER
+        └── thresholds: MLBPropThresholdRead[]   # always 1+, 2+, 3+ when offered
+            ├── threshold: 1 | 2 | 3
+            ├── line: 0.5 | 1.5 | 2.5          # wager-leg encoding
+            ├── american: string                 # price for "N+" (yes)
+            └── under_american: string           # complementary no side (pricer only)
+```
+
+**Pricing model**
+
+Each milestone’s fair probability is `P(X ≥ threshold)` for a Poisson distribution
+whose rate λ is the player’s rolling per-game average of that stat. The house margin
+is applied to the two-way (reaches / does-not-reach) market per milestone. The pricer
+selects the milestone matching the client’s `line`, de-vigs `american` / `under_american`,
+and applies the ticket-level margin once at parlay aggregation

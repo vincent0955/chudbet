@@ -33,7 +33,7 @@ export function AppLayout() {
                   `app-nav__link${isActive ? ' app-nav__link--active' : ''}`
                 }
               >
-                Home
+                NBA
               </NavLink>
               <NavLink
                 to="/mlb"

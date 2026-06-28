@@ -6,7 +6,7 @@ import { useBetSlip } from '../../context/BetSlipContext'
 import { mlbTeamLogoUrl } from '../../lib/mlbMedia'
 import { gameAcceptsPreGameWagers } from '../../lib/gameWagerGate'
 import { parseAmericanOddsString } from '../../utils/parlayOdds'
-import { formatGameDate } from '../browse/format'
+import { formatGameDate, formatTipOrGameStatusLabel } from '../browse/format'
 
 type LoadState =
   | { kind: 'loading' }
@@ -22,6 +22,9 @@ function teamLogo(map: Map<number, MLBTeamRead>, id: number): string | null {
   return mlbTeamLogoUrl(map.get(id)?.mlb_team_id)
 }
 
+function gameTimeLabel(game: MLBGameRead): string {
+  return formatTipOrGameStatusLabel(game.game_time_utc, game.status) ?? game.status
+}
 type SpreadParts = { line: string; odds: string }
 type TotalParts = { sidePoints: string; odds: string }
 type MarketTriple = { spread: SpreadParts; ml: string; total: TotalParts }
@@ -38,11 +41,11 @@ function StackedOddsPill({ top, bottom }: { top: string; bottom: string }) {
 function TeamLogoImg({ url }: { url: string | null; label: string }) {
   const [broken, setBroken] = useState(false)
   if (!url || broken) {
-    return <span className="upcoming-game-bar__logo upcoming-game-bar__logo--placeholder" aria-hidden />
+    return <span className="upcoming-game-bar__team-logo upcoming-game-bar__team-logo--placeholder" aria-hidden />
   }
   return (
     <img
-      className="upcoming-game-bar__logo"
+      className="upcoming-game-bar__team-logo"
       src={url}
       alt=""
       loading="lazy"
@@ -99,10 +102,7 @@ function GameOddsRow({
     odds_american: totalOdds,
   }
 
-  const toggle = (e: MouseEvent, leg: GameLegIn, label: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (!wagerable) return
+  const toggle = (leg: GameLegIn, label: string) => {
     const key = { kind: 'game' as const, leg }
     if (hasLeg(key)) {
       removeLegByLeg(key)
@@ -111,40 +111,49 @@ function GameOddsRow({
     addLeg(key, { playerLine: teamLabel, propLine: label, gameSlipHeader: gameHeader }, leg.odds_american)
   }
 
+  const spreadSelected = hasLeg({ kind: 'game', leg: spreadLeg })
+  const mlSelected = hasLeg({ kind: 'game', leg: mlLeg })
+  const totalSelected = hasLeg({ kind: 'game', leg: totalLeg })
+
+  const onPillClick =
+    (leg: GameLegIn, label: string) => (e: MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!wagerable) return
+      toggle(leg, label)
+    }
+
   return (
-    <div className="upcoming-game-bar__team-row">
-      <div className="upcoming-game-bar__team">
+    <div className={`upcoming-game-bar__line${showAt ? ' upcoming-game-bar__line--with-at' : ''}`}>
+      <span className="upcoming-game-bar__team">
+        {showAt ? <span className="upcoming-game-bar__at-inline">@</span> : null}
         <TeamLogoImg url={teamLogoUrl} label={teamLabel} />
-        <span className="upcoming-game-bar__team-name">
-          {showAt ? `@ ${teamLabel}` : teamLabel}
-        </span>
-      </div>
-      <div className="upcoming-game-bar__markets">
-        <button
-          type="button"
-          className="upcoming-game-bar__market-btn"
-          disabled={!wagerable}
-          onClick={(e) => toggle(e, spreadLeg, `Run Line ${markets.spread.line} (${markets.spread.odds})`)}
-        >
-          <StackedOddsPill top={markets.spread.line} bottom={markets.spread.odds} />
-        </button>
-        <button
-          type="button"
-          className="upcoming-game-bar__market-btn"
-          disabled={!wagerable}
-          onClick={(e) => toggle(e, mlLeg, `ML ${markets.ml}`)}
-        >
-          <span className="upcoming-game-bar__pill">{markets.ml}</span>
-        </button>
-        <button
-          type="button"
-          className="upcoming-game-bar__market-btn"
-          disabled={!wagerable}
-          onClick={(e) => toggle(e, totalLeg, `${markets.total.sidePoints} (${markets.total.odds})`)}
-        >
-          <StackedOddsPill top={markets.total.sidePoints} bottom={markets.total.odds} />
-        </button>
-      </div>
+        <span>{teamLabel}</span>
+      </span>
+      <button
+        type="button"
+        className={`upcoming-game-bar__pill-btn${spreadSelected ? ' upcoming-game-bar__pill-btn--selected' : ''}`}
+        disabled={!wagerable}
+        onClick={onPillClick(spreadLeg, `Run Line ${markets.spread.line}`)}
+      >
+        <StackedOddsPill top={markets.spread.line} bottom={markets.spread.odds} />
+      </button>
+      <button
+        type="button"
+        className={`upcoming-game-bar__pill-btn${mlSelected ? ' upcoming-game-bar__pill-btn--selected' : ''}`}
+        disabled={!wagerable}
+        onClick={onPillClick(mlLeg, 'Moneyline')}
+      >
+        <span className="upcoming-game-bar__pill upcoming-game-bar__pill--plain">{markets.ml}</span>
+      </button>
+      <button
+        type="button"
+        className={`upcoming-game-bar__pill-btn${totalSelected ? ' upcoming-game-bar__pill-btn--selected' : ''}`}
+        disabled={!wagerable}
+        onClick={onPillClick(totalLeg, `Total ${markets.total.sidePoints}`)}
+      >
+        <StackedOddsPill top={markets.total.sidePoints} bottom={markets.total.odds} />
+      </button>
     </div>
   )
 }
@@ -299,14 +308,14 @@ export function MLBUpcomingGames() {
                         <div className="upcoming-game-bar__meta-left">
                           <span className="upcoming-game-bar__meta-date">{formatGameDate(g.game_date)}</span>
                           <span className="upcoming-game-bar__meta-sep">–</span>
-                          <span className="upcoming-game-bar__status">{g.status}</span>
+                          <span className="upcoming-game-bar__status">{gameTimeLabel(g)}</span>
                         </div>
                       </div>
                       <GameOddsRow
                         game={g}
                         teamLabel={away}
                         teamLogoUrl={awayLogo}
-                        gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${g.status}`}
+                        gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${gameTimeLabel(g)}`}
                         markets={mkts.away}
                         side="away"
                       />
@@ -314,7 +323,7 @@ export function MLBUpcomingGames() {
                         game={g}
                         teamLabel={home}
                         teamLogoUrl={homeLogo}
-                        gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${g.status}`}
+                        gameHeader={`${away} @ ${home} · ${formatGameDate(g.game_date)} · ${gameTimeLabel(g)}`}
                         markets={mkts.home}
                         side="home"
                         showAt

@@ -17,12 +17,12 @@ test.describe('Home / upcoming games', () => {
     await expect(page.getByText('+130')).toBeVisible()
   })
 
-  test('top nav exposes Home and My Bets', async ({ page }) => {
+  test('top nav exposes NBA and My Bets', async ({ page }) => {
     await installApiMocks(page)
     await page.goto('/')
 
     const nav = page.getByRole('navigation', { name: 'Main' })
-    await expect(nav.getByRole('link', { name: 'Home' })).toBeVisible()
+    await expect(nav.getByRole('link', { name: 'NBA' })).toBeVisible()
     await expect(nav.getByRole('link', { name: 'My Bets' })).toBeVisible()
   })
 

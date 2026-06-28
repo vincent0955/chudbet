@@ -7,9 +7,8 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.db.base import Base
 from app.db import models  # noqa: F401 — register models
-from app.db.migrate import ensure_postgres_schema
+from app.db.bootstrap import prepare_worker_engine
 from app.db.session import get_engine
 from app.ingestion.nba_sync import refresh_games_for_open_wagers, run_full_ingest
 from app.services.settlement import settle_open_wagers, ticket_is_pure_nba
@@ -35,8 +34,7 @@ def run_ingest_job() -> None:
     """Pull recent slate / box scores using env-tuned `run_full_ingest`."""
     logger.info("Ingest job starting")
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
-    ensure_postgres_schema(engine)
+    prepare_worker_engine(engine)
 
     season = os.getenv("NBA_SEASON", "2025-26")
     scoreboard_days = _int_env("WORKER_SCOREBOARD_DAYS", 3)
@@ -64,8 +62,7 @@ def run_settlement_job() -> None:
     """Grade OPEN wagers against DB box scores."""
     logger.info("Settlement job starting")
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
-    ensure_postgres_schema(engine)
+    prepare_worker_engine(engine)
 
     with Session(engine) as session:
         if _truthy("WORKER_REFRESH_OPEN_WAGER_GAMES_BEFORE_SETTLE", "true"):

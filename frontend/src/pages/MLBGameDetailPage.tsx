@@ -69,7 +69,7 @@ export function MLBGameDetailPage() {
 
   if (state.kind === 'loading') {
     return (
-      <div className="page page--browse">
+      <div className="page page--browse page--game-detail">
         <p className="muted">Loading game…</p>
       </div>
     )
@@ -98,27 +98,45 @@ export function MLBGameDetailPage() {
   const home = teamMap.get(game.home_team_id)?.name ?? `Team #${game.home_team_id}`
   const awayLogo = mlbTeamLogoUrl(teamMap.get(game.away_team_id)?.mlb_team_id)
   const homeLogo = mlbTeamLogoUrl(teamMap.get(game.home_team_id)?.mlb_team_id)
-  const slipHeader = `${away} @ ${home} · ${formatGameDate(game.game_date)} · ${game.status}`
+  const timeLabel = formatTipOrGameStatusLabel(game.game_time_utc, game.status)
+  const slipHeader = `${away} @ ${home} · ${formatGameDate(game.game_date)}${timeLabel ? ` · ${timeLabel}` : ''}`
   const wageringLocked = !gameAcceptsPreGameWagers({ sport: 'MLB', status: game.status })
 
   return (
-    <div className="page page--browse">
-      <section className="card game-detail__header">
-        <p className="muted">
-          <Link to="/mlb" className="inline-link">
-            MLB
-          </Link>
+    <div className="page page--browse page--game-detail">
+      <p className="game-detail__crumb">
+        <Link to="/mlb" className="inline-link">
+          ← MLB
+        </Link>
+      </p>
+
+      <section className="card game-detail__hero">
+        <p className="game-detail__eyebrow muted">
+          {formatGameDate(game.game_date)} · {game.status}
         </p>
-        <h1 className="page-title game-detail__matchup">
-          {awayLogo && <img className="game-detail__team-logo" src={awayLogo} alt="" />}
-          <span>{away}</span>
-          <span className="game-detail__at">@</span>
-          {homeLogo && <img className="game-detail__team-logo" src={homeLogo} alt="" />}
-          <span>{home}</span>
+        <h1 className="game-detail__title">
+          {awayLogo && (
+            <img
+              className="game-detail__team-logo"
+              src={awayLogo}
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
+          )}
+          <span className="game-detail__away">{away}</span>
+          <span className="game-detail__at muted"> @ </span>
+          {homeLogo && (
+            <img
+              className="game-detail__team-logo"
+              src={homeLogo}
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
+          )}
+          <span className="game-detail__home">{home}</span>
         </h1>
-        <p className="muted game-detail__meta">
-          {formatGameDate(game.game_date)} · {formatTipOrGameStatusLabel(game.status, game.game_time_utc)}
-        </p>
       </section>
 
       <MLBPropBoard bundle={propLines} slipGameHeader={slipHeader} wageringLocked={wageringLocked} />

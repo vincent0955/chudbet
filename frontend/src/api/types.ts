@@ -126,13 +126,23 @@ export interface MLBGameRead {
   mlb_game_id: string | null
 }
 
-/** One offered MLB player-prop stat: line plus over/under American odds. */
+/** One "N-or-more" milestone for an MLB player-prop stat (e.g. `2+` hits). */
+export interface MLBPropThresholdRead {
+  /** Integer count the player must reach (1, 2, or 3). */
+  threshold: number
+  /** Equivalent half-point line stored on a wager leg (`threshold - 0.5`). */
+  line: number
+  /** Price for the "N+" (yes) side shown to users. */
+  american: string
+  /** Complementary (does-not-reach) side, used by the server pricer. */
+  under_american: string
+}
+
+/** One offered MLB player-prop stat with its "N-or-more" milestone ladder. */
 export interface MLBPropStatLineRead {
   /** One of the MLBStatType values, e.g. 'HITS', 'STRIKEOUTS_PITCHER'. */
   stat_type: MLBStatType
-  line: number
-  over_american: string
-  under_american: string
+  thresholds: MLBPropThresholdRead[]
 }
 
 /** Per-player MLB prop lines for one game (only offered stats are included). */

@@ -31,6 +31,8 @@ def get_cors_origins() -> list[str]:
     return [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        *(f"http://localhost:{port}" for port in range(5174, 5181)),
+        *(f"http://127.0.0.1:{port}" for port in range(5174, 5181)),
     ]
 
 

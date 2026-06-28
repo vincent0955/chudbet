@@ -18,9 +18,8 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.db.base import Base
 from app.db import models  # noqa: F401 — register models
-from app.db.migrate import ensure_postgres_schema
+from app.db.bootstrap import prepare_worker_engine
 from app.db.session import get_engine
 from app.mlb.ingestion import run_full_mlb_ingest
 from app.mlb.stats_api_client import MLBStatsAPIClient
@@ -32,8 +31,7 @@ logger = logging.getLogger(__name__)
 def _prepare_engine():
     """Ensure the schema exists before a job touches the database."""
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
-    ensure_postgres_schema(engine)
+    prepare_worker_engine(engine)
     return engine
 
 

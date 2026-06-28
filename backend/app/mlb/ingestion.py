@@ -27,13 +27,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.enums import Sport
 from app.db.models import Game, Player, Team
 from app.db.models.mlb_player_game_stats import MLBPlayerGameStat
-from app.mlb.config import get_schedule_max_days
+from app.mlb.config import get_schedule_lookback_days, get_schedule_max_days
 from app.mlb.enums import MLBStatType
 from app.mlb.status import MLBGameStatus, classify_status
 from app.mlb.stats_api_client import (
@@ -402,11 +402,14 @@ def sync_schedule(
     client: MLBStatsAPIClient,
     *,
     window_days: int,
+    lookback_days: int | None = None,
 ) -> dict[int, Game]:
     """Upsert one ``Game`` per scheduled MLB game in the window (Req 4.1-4.6).
 
-    Fetches the schedule for a window of at most ``MLB_SCHEDULE_MAX_DAYS`` days
-    starting today (UTC) and upserts each game keyed by MLB_Game_ID, storing the
+    Fetches the schedule from ``today - lookback_days`` through
+    ``today + forward_window - 1`` (UTC). The forward span is clamped to
+    ``MLB_SCHEDULE_MAX_DAYS``; lookback defaults to ``MLB_SCHEDULE_LOOKBACK_DAYS``
+    so recent finals are available for game-market and prop pricing samples.
     home/away team, game date, and UTC start time (Req 4.1). Each game's status
     text is classified into exactly one of PRE_GAME / LIVE / FINAL (Req 4.2). An
     existing game has its status and scheduled start updated rather than being
@@ -419,8 +422,13 @@ def sync_schedule(
     Returns a ``{mlb_game_id: Game}`` map of the games upserted this run.
     """
     days = _resolve_window_days(window_days)
-    start = datetime.now(timezone.utc).date()
-    end = start + timedelta(days=days - 1)
+    if lookback_days is None:
+        lookback_days = get_schedule_lookback_days()
+    lookback_days = max(0, int(lookback_days))
+
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=lookback_days)
+    end = today + timedelta(days=days - 1)
 
     payloads = client.schedule(start, end)
     games_by_mlb_id: dict[int, Game] = {}
@@ -485,13 +493,42 @@ def sync_schedule(
 
     session.flush()
     logger.info(
-        "Synced %d MLB games for window %s..%s (%d day(s))",
+        "Synced %d MLB games for window %s..%s (lookback=%d day(s), forward=%d day(s))",
         len(games_by_mlb_id),
         start.isoformat(),
         end.isoformat(),
+        lookback_days,
         days,
     )
     return games_by_mlb_id
+
+
+def _games_for_box_score_batch(
+    session: Session,
+    synced: dict[int, Game],
+    *,
+    lookback_days: int,
+) -> list[Game]:
+    """Return non-PRE_GAME MLB games in the lookback window for box-score refresh."""
+    by_id: dict[int, Game] = {game.id: game for game in synced.values()}
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=max(0, int(lookback_days)))
+
+    extra = session.scalars(
+        select(Game).where(
+            Game.sport == Sport.MLB,
+            Game.game_date >= cutoff,
+            Game.mlb_game_id.is_not(None),
+        )
+    ).all()
+    for game in extra:
+        by_id.setdefault(game.id, game)
+
+    return [
+        game
+        for game in by_id.values()
+        if classify_status(None, game.status) is not MLBGameStatus.PRE_GAME
+        and _game_needs_box_score(session, game)
+    ]
 
 
 # --- box-score payload parsing helpers --------------------------------------
@@ -594,6 +631,49 @@ def _iter_box_lines(payload: Any) -> list[_ParsedBoxLine]:
     return lines
 
 
+def _team_runs_from_boxscore(payload: Any) -> tuple[int | None, int | None]:
+    """Read home/away run totals from ``statsapi.boxscore_data`` batting totals."""
+    if not isinstance(payload, dict):
+        return None, None
+    home = payload.get("homeBattingTotals")
+    away = payload.get("awayBattingTotals")
+    if not isinstance(home, dict) or not isinstance(away, dict):
+        return None, None
+    if home.get("r") is None or away.get("r") is None:
+        return None, None
+    return _parse_run_total(home.get("r")), _parse_run_total(away.get("r"))
+
+
+def _apply_team_runs_from_boxscore(
+    game: Game, payload: Any, status: MLBGameStatus
+) -> None:
+    """Persist final/live run totals from a box score when the schedule lacks them."""
+    if status is MLBGameStatus.PRE_GAME:
+        return
+    home_r, away_r = _team_runs_from_boxscore(payload)
+    if home_r is None or away_r is None:
+        return
+    game.home_score = home_r
+    game.away_score = away_r
+
+
+def _game_needs_box_score(session: Session, game: Game) -> bool:
+    """Return whether a game still needs a box-score fetch this ingest run."""
+    status = classify_status(None, game.status)
+    if status is MLBGameStatus.PRE_GAME:
+        return False
+    if game.home_score is None or game.away_score is None:
+        return True
+    if status is MLBGameStatus.LIVE:
+        return True
+    existing = session.scalar(
+        select(func.count())
+        .select_from(MLBPlayerGameStat)
+        .where(MLBPlayerGameStat.game_id == game.id)
+    )
+    return not existing
+
+
 def _apply_box_line(
     record: MLBPlayerGameStat, values: dict[MLBStatType, int], status: MLBGameStatus
 ) -> None:
@@ -661,6 +741,7 @@ def ingest_box_score_for_game(
         return 0
 
     payload = client.boxscore(mlb_game_id)
+    _apply_team_runs_from_boxscore(game, payload, status)
     lines = _iter_box_lines(payload)
     if not lines:
         # Req 5.6: no usable box-score data -> leave existing stats unchanged,
@@ -780,11 +861,25 @@ def run_full_mlb_ingest(
     games_by_mlb_id = sync_schedule(session, client, window_days=window_days)
     summary.games_synced = len(games_by_mlb_id)
 
+    # Commit schedule (with final scores) before the slow box-score batch so game
+    # markets and prop samples are visible while historical box scores ingest.
+    session.commit()
+
+    lookback_days = get_schedule_lookback_days()
+    box_score_games = _games_for_box_score_batch(
+        session, games_by_mlb_id, lookback_days=lookback_days
+    )
+
     # Box-score batch: one game's signaled failure must not abort the batch (Req 6.5).
-    for mlb_game_id, game in games_by_mlb_id.items():
+    for game in box_score_games:
+        mlb_game_id = _safe_positive_int(game.mlb_game_id)
+        if mlb_game_id is None:
+            continue
         try:
             rows = ingest_box_score_for_game(session, client, game)
+            session.commit()
         except MLBStatsAPIError as exc:
+            session.rollback()
             # Req 6.5: log the per-game failure and continue with the rest.
             summary.failed_game_ids.append(mlb_game_id)
             logger.warning(

@@ -148,15 +148,19 @@ describe('MLBPropBoard', () => {
               stat_lines: [
                 {
                   stat_type: 'HITS',
-                  line: 1.5,
-                  over_american: '-110',
-                  under_american: '-110',
+                  thresholds: [
+                    { threshold: 1, line: 0.5, american: '-200', under_american: '+160' },
+                    { threshold: 2, line: 1.5, american: '+250', under_american: '-320' },
+                    { threshold: 3, line: 2.5, american: '+900', under_american: '-1400' },
+                  ],
                 },
                 {
                   stat_type: 'RUNS',
-                  line: 0.5,
-                  over_american: '-105',
-                  under_american: '-115',
+                  thresholds: [
+                    { threshold: 1, line: 0.5, american: '-120', under_american: '-105' },
+                    { threshold: 2, line: 1.5, american: '+400', under_american: '-560' },
+                    { threshold: 3, line: 2.5, american: '+1200', under_american: '-2000' },
+                  ],
                 },
               ],
             },

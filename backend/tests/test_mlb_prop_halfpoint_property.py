@@ -1,26 +1,22 @@
-"""Property-based test for nearest-half-point MLB prop lines.
+"""Property-based test for MLB prop milestone lines.
 
 Feature: mlb-support, Property 18
 Validates: Requirements 9.2
 
-Property 18 -- *Prop lines are the nearest half-point to the rolling average.*
-For arbitrary player histories, every prop line offered by
-``app.mlb.prop_lines.build_mlb_game_prop_lines_bundle`` must equal the half-point
-value nearest to the rolling average of the player's per-game values for that
-``MLBStatType`` over the prior MLB games inside the lookback window -- that is,
-``round(avg - 0.5) + 0.5`` -- and must always have a fractional part of exactly
-``0.5``.
+Property 18 -- *Prop milestones are the fixed ``1+``/``2+``/``3+`` ladder at
+half-point lines.* For arbitrary player histories, every stat line offered by
+``app.mlb.prop_lines.build_mlb_game_prop_lines_bundle`` must expose exactly the
+thresholds ``1``, ``2``, ``3`` (in order), each stored at the half-point line
+``threshold - 0.5`` (``0.5``/``1.5``/``2.5``) so it admits no push and grades as
+``value >= threshold`` under the existing OVER settlement.
 
 The world generates rosters (pitchers and batters on both teams) plus a history
-of prior MLB games, each carrying an explicit per-player box-score line. We
-record the exact values we insert per ``(player, stat)`` so the expected line
-can be recomputed independently of the service and compared against the bundle
-output.
+of prior MLB games carrying explicit per-player box-score lines, large enough to
+clear the minimum sample size so milestones are actually offered.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterator
 from datetime import date, timedelta
 
@@ -34,21 +30,11 @@ import app.db.models  # noqa: F401
 from app.db.base import Base
 from app.db.enums import Sport
 from app.db.models import Game, MLBPlayerGameStat, Player, Team
-from app.mlb.enums import MLBStatType
 from app.mlb.prop_lines import build_mlb_game_prop_lines_bundle
 
 # Target game date; every generated prior game is placed strictly before it and
 # within the default prop lookback window (30 days) so all count as samples.
 _TARGET_DATE = date(2024, 7, 20)
-
-# Maps each offered stat type (by value) to the box-score column it reads.
-_STAT_COLUMNS: dict[str, str] = {
-    MLBStatType.HITS.value: "hits",
-    MLBStatType.TOTAL_BASES.value: "total_bases",
-    MLBStatType.RBI.value: "rbi",
-    MLBStatType.RUNS.value: "runs",
-    MLBStatType.STRIKEOUTS_PITCHER.value: "strikeouts_pitcher",
-}
 
 
 def _fresh_session() -> Iterator[Session]:
@@ -63,12 +49,6 @@ def _fresh_session() -> Iterator[Session]:
         db.close()
         Base.metadata.drop_all(engine)
         engine.dispose()
-
-
-def _expected_half_point(values: list[int]) -> float:
-    """Recompute the nearest-half-point line independently of the service."""
-    avg = sum(values) / len(values)
-    return float(round(avg - 0.5) + 0.5)
 
 
 # A world plan: enough prior games to clear the default min-sample size (5), per
@@ -89,15 +69,15 @@ _world = st.fixed_dictionaries(
 
 @settings(deadline=None, max_examples=150)
 @given(world=_world)
-def test_property18_prop_lines_are_nearest_half_point(world: dict) -> None:
+def test_property18_prop_milestones_are_fixed_half_point_ladder(world: dict) -> None:
     """**Validates: Requirements 9.2**
 
     Feature: mlb-support, Property 18
 
     Build an MLB game with arbitrary player histories, price the player props,
-    and assert every offered prop line equals ``round(avg - 0.5) + 0.5`` for the
-    player's per-game average of that stat and always has a fractional part of
-    exactly ``0.5``.
+    and assert every offered stat line exposes exactly the ``1+``/``2+``/``3+``
+    milestones at half-point lines ``0.5``/``1.5``/``2.5`` (fractional part
+    exactly ``0.5``).
     """
     n_games: int = world["n_games"]
     n_batters: int = world["n_batters"]
@@ -162,18 +142,13 @@ def test_property18_prop_lines_are_nearest_half_point(world: dict) -> None:
         session.add_all(prior_games)
         session.flush()
 
-        # Box-score lines for every player in every prior game. Record the exact
-        # per-(player, column) values so the expected line can be recomputed.
-        recorded: dict[int, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+        # Box-score lines for every player in every prior game.
         pool_idx = 0
         stat_rows: list[MLBPlayerGameStat] = []
         for g in prior_games:
             for player in players:
                 vals = [stat_pool[(pool_idx + k) % len(stat_pool)] for k in range(5)]
                 pool_idx += 1
-                columns = ("hits", "total_bases", "rbi", "runs", "strikeouts_pitcher")
-                for column, value in zip(columns, vals):
-                    recorded[player.id][column].append(value)
                 stat_rows.append(
                     MLBPlayerGameStat(
                         player_id=player.id,
@@ -202,26 +177,31 @@ def test_property18_prop_lines_are_nearest_half_point(world: dict) -> None:
 
         bundle = build_mlb_game_prop_lines_bundle(session, target)
 
-        # At least one player/line must be offered so the property is non-vacuous.
+        # At least one stat line must be offered so the property is non-vacuous.
         offered_lines = 0
         for player_lines in bundle.players:
             for stat_line in player_lines.stat_lines:
                 offered_lines += 1
-                column = _STAT_COLUMNS[stat_line.stat_type]
-                values = recorded[player_lines.id][column]
-                expected = _expected_half_point(values)
 
-                assert stat_line.line == expected, (
-                    f"{player_lines.full_name}/{stat_line.stat_type}: line "
-                    f"{stat_line.line!r} != nearest half-point {expected!r} "
-                    f"(values={values})"
+                # Exactly the fixed 1+/2+/3+ ladder, in order.
+                assert [t.threshold for t in stat_line.thresholds] == [1, 2, 3], (
+                    f"{player_lines.full_name}/{stat_line.stat_type}: thresholds "
+                    f"{[t.threshold for t in stat_line.thresholds]!r} != [1, 2, 3]"
                 )
-                # Fractional part must be exactly 0.5 (admits no push).
-                fractional = stat_line.line - int(stat_line.line)
-                assert abs(fractional) == 0.5, (
-                    f"{player_lines.full_name}/{stat_line.stat_type}: line "
-                    f"{stat_line.line!r} fractional part {fractional!r} != 0.5"
-                )
+
+                for milestone in stat_line.thresholds:
+                    # Each milestone's line is threshold - 0.5 ...
+                    assert milestone.line == milestone.threshold - 0.5, (
+                        f"{player_lines.full_name}/{stat_line.stat_type}: "
+                        f"{milestone.threshold}+ line {milestone.line!r} "
+                        f"!= {milestone.threshold - 0.5!r}"
+                    )
+                    # ... and therefore always has a fractional part of exactly 0.5.
+                    fractional = milestone.line - int(milestone.line)
+                    assert abs(fractional) == 0.5, (
+                        f"{player_lines.full_name}/{stat_line.stat_type}: line "
+                        f"{milestone.line!r} fractional part {fractional!r} != 0.5"
+                    )
 
         assert offered_lines > 0, "expected at least one offered prop line"
     finally:

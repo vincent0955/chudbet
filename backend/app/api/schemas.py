@@ -8,7 +8,7 @@ class TeamRead(BaseModel):
 
     id: int
     name: str
-    nba_team_id: int
+    nba_team_id: int | None = None
 
 
 class PlayerRead(BaseModel):
@@ -17,7 +17,7 @@ class PlayerRead(BaseModel):
     id: int
     full_name: str
     team_id: int
-    nba_player_id: int
+    nba_player_id: int | None = None
 
 
 class GameRead(BaseModel):
@@ -61,7 +61,7 @@ class PlayerPropLinesRead(BaseModel):
     team_id: int
     team_name: str
     team_nba_id: int | None = None
-    nba_player_id: int
+    nba_player_id: int | None = None
     sample_size: int
     pts_line: float | None = None
     reb_line: float | None = None
@@ -116,13 +116,28 @@ class MLBGameRead(BaseModel):
     mlb_game_id: str | None = None
 
 
+class MLBPropThresholdRead(BaseModel):
+    """One "N-or-more" milestone for an MLB player-prop stat (e.g. ``2+`` hits).
+
+    ``threshold`` is the integer count the player must reach (1, 2, or 3).
+    ``line`` is the equivalent half-point line stored on a wager leg
+    (``threshold - 0.5``) so settlement reuses the existing ``value > line``
+    OVER logic. ``american`` is the price for the "N+" (yes) side shown to users;
+    ``under_american`` is the complementary (does-not-reach) side, retained so the
+    pricer can de-vig the two-way market.
+    """
+
+    threshold: int
+    line: float
+    american: str
+    under_american: str
+
+
 class MLBPropStatLineRead(BaseModel):
-    """One offered MLB player-prop stat: line plus over/under American odds."""
+    """One offered MLB player-prop stat with its "N-or-more" milestone ladder."""
 
     stat_type: str
-    line: float
-    over_american: str
-    under_american: str
+    thresholds: list[MLBPropThresholdRead]
 
 
 class MLBPlayerPropLinesRead(BaseModel):

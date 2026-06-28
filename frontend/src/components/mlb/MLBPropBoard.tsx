@@ -8,7 +8,6 @@ import type {
 import { parseAmericanOddsString } from '../../utils/parlayOdds'
 import { useBetSlip } from '../../context/BetSlipContext'
 import { mlbPlayerHeadshotUrl, mlbTeamLogoUrl } from '../../lib/mlbMedia'
-import { formatHalfPointLine } from '../browse/format'
 
 type Props = {
   bundle: MLBGamePropLinesBundle
@@ -28,93 +27,92 @@ function statLineFor(player: MLBPlayerPropLinesRead, stat: MLBStatType): MLBProp
   return player.stat_lines.find((s) => s.stat_type === stat) ?? null
 }
 
-function directionLabel(side: 'OVER' | 'UNDER'): string {
-  return side === 'OVER' ? 'OVER' : 'UNDER'
+/** Implied (with-vig) probability for an American-odds string; 0 when unparseable. */
+function impliedProbability(american: string): number {
+  const n = parseAmericanOddsString(american)
+  if (n == null || n === 0) return 0
+  return n > 0 ? 100 / (n + 100) : Math.abs(n) / (Math.abs(n) + 100)
 }
 
+/** Rank metric for a stat line: summed milestone likelihood (proxy for projected volume). */
+function statStrength(line: MLBPropStatLineRead): number {
+  return line.thresholds.reduce((acc, t) => acc + impliedProbability(t.american), 0)
+}
+
+/**
+ * Milestone ("N+") picker. Each offered threshold is its own market with its own
+ * price; selecting one deselects any other milestone for the same player/stat so
+ * a single pick stays active at a time. Each milestone is stored on the slip as
+ * an OVER leg at `threshold - 0.5`, matching how the server settles it.
+ */
 function PropPickButtons({
   gameId,
   slipGameHeader,
   player,
   stat,
-  line,
-  overAmerican,
-  underAmerican,
+  statTitle,
+  entry,
   disabled,
 }: {
   gameId: number
   slipGameHeader?: string
   player: MLBPlayerPropLinesRead
   stat: MLBStatType
-  line: number
-  overAmerican: string
-  underAmerican: string
+  statTitle: string
+  entry: MLBPropStatLineRead
   disabled?: boolean
 }) {
   const { addLeg, hasLeg, removeLegByLeg } = useBetSlip()
-  const lineLabel = formatHalfPointLine(line)
-  const overLeg = {
+
+  const legFor = (line: number) => ({
     player_id: player.id,
     game_id: gameId,
     stat_type: stat,
     line,
     direction: 'OVER' as const,
-  }
-  const underLeg = {
-    player_id: player.id,
-    game_id: gameId,
-    stat_type: stat,
-    line,
-    direction: 'UNDER' as const,
-  }
-  const overSelected = hasLeg({ kind: 'player', leg: overLeg })
-  const underSelected = hasLeg({ kind: 'player', leg: underLeg })
+  })
 
-  const toggle = (direction: 'OVER' | 'UNDER') => {
+  const toggle = (threshold: number, american: string) => {
     if (disabled) return
-    const leg = direction === 'OVER' ? overLeg : underLeg
-    const opposite = direction === 'OVER' ? underLeg : overLeg
+    const leg = legFor(threshold - 0.5)
     if (hasLeg({ kind: 'player', leg })) {
       removeLegByLeg({ kind: 'player', leg })
       return
     }
-    if (hasLeg({ kind: 'player', leg: opposite })) {
-      removeLegByLeg({ kind: 'player', leg: opposite })
+    // Keep at most one milestone per player/stat selected.
+    for (const other of entry.thresholds) {
+      if (other.threshold === threshold) continue
+      removeLegByLeg({ kind: 'player', leg: legFor(other.threshold - 0.5) })
     }
-    const odds = direction === 'OVER' ? overAmerican : underAmerican
     addLeg(
       { kind: 'player', leg },
       {
         playerLine: player.full_name,
-        propLine: `${stat} ${directionLabel(direction)} ${lineLabel}`,
+        propLine: `${statTitle} ${threshold}+`,
         gameSlipHeader: slipGameHeader ?? null,
       },
-      parseAmericanOddsString(odds),
+      parseAmericanOddsString(american),
     )
   }
 
   return (
     <div className="game-props__ou">
-      <button
-        type="button"
-        className={`game-props__ou-btn${overSelected ? ' game-props__ou-btn--selected' : ''}`}
-        onClick={() => toggle('OVER')}
-        aria-pressed={overSelected}
-        disabled={disabled}
-      >
-        <span className="game-props__ou-btn-label">O {lineLabel}</span>
-        <span className="game-props__ou-btn-odds muted">{overAmerican}</span>
-      </button>
-      <button
-        type="button"
-        className={`game-props__ou-btn${underSelected ? ' game-props__ou-btn--selected' : ''}`}
-        onClick={() => toggle('UNDER')}
-        aria-pressed={underSelected}
-        disabled={disabled}
-      >
-        <span className="game-props__ou-btn-label">U {lineLabel}</span>
-        <span className="game-props__ou-btn-odds muted">{underAmerican}</span>
-      </button>
+      {entry.thresholds.map((t) => {
+        const selected = hasLeg({ kind: 'player', leg: legFor(t.threshold - 0.5) })
+        return (
+          <button
+            key={t.threshold}
+            type="button"
+            className={`game-props__ou-btn${selected ? ' game-props__ou-btn--selected' : ''}`}
+            onClick={() => toggle(t.threshold, t.american)}
+            aria-pressed={selected}
+            disabled={disabled}
+          >
+            <span className="game-props__ou-btn-label">{t.threshold}+</span>
+            <span className="game-props__ou-btn-odds muted">{t.american}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -167,9 +165,9 @@ export function MLBPropBoard({ bundle, slipGameHeader, wageringLocked }: Props) 
     const ranked = [...players]
       .filter((p) => statLineFor(p, stat) != null)
       .sort((a, b) => {
-        const aLine = statLineFor(a, stat)?.line ?? -Infinity
-        const bLine = statLineFor(b, stat)?.line ?? -Infinity
-        if (aLine !== bLine) return bLine - aLine
+        const aStrength = statStrength(statLineFor(a, stat)!)
+        const bStrength = statStrength(statLineFor(b, stat)!)
+        if (aStrength !== bStrength) return bStrength - aStrength
         if (a.sample_size !== b.sample_size) return b.sample_size - a.sample_size
         return a.full_name.localeCompare(b.full_name)
       })
@@ -234,9 +232,8 @@ export function MLBPropBoard({ bundle, slipGameHeader, wageringLocked }: Props) 
                           slipGameHeader={slipGameHeader}
                           player={player}
                           stat={stat}
-                          line={lineEntry.line}
-                          overAmerican={lineEntry.over_american}
-                          underAmerican={lineEntry.under_american}
+                          statTitle={title}
+                          entry={lineEntry}
                           disabled={wageringLocked}
                         />
                       </div>

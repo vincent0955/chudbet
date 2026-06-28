@@ -228,14 +228,16 @@ def test_property14_two_way_markets_carry_positive_house_margin(world: dict) -> 
             markets.total.over_american, markets.total.under_american, "total runs"
         )
 
-        # --- Player props (Req 9.4): every offered over/under pair ---
+        # --- Player props (Req 9.4): every offered milestone (reaches/does-not) ---
         bundle = build_mlb_game_prop_lines_bundle(session, target)
         for player_lines in bundle.players:
             for stat_line in player_lines.stat_lines:
-                _assert_two_way_overround(
-                    stat_line.over_american,
-                    stat_line.under_american,
-                    f"prop {player_lines.full_name}/{stat_line.stat_type}",
-                )
+                for milestone in stat_line.thresholds:
+                    _assert_two_way_overround(
+                        milestone.american,
+                        milestone.under_american,
+                        f"prop {player_lines.full_name}/{stat_line.stat_type}"
+                        f" {milestone.threshold}+",
+                    )
     finally:
         gen.close()

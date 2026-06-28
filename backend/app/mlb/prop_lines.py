@@ -9,13 +9,22 @@ applicable to that player:
 
 keyed off the player's ``primary_position`` (Req 9.1).
 
-Each line is the nearest half-point value to the rolling average of the player's
-per-game values for that stat over prior MLB games that fall within
-``MLB_PROP_LOOKBACK_DAYS`` (Req 9.2). A stat with fewer prior games than
+Baseball props use an "N-or-more" milestone ladder rather than a single
+over/under line: each offered stat exposes the fixed thresholds ``1+``, ``2+``,
+and ``3+``, each with its own price. Each threshold's probability is modeled as
+``P(X >= threshold)`` for a Poisson distribution whose rate is the player's
+rolling per-game average of that stat over prior MLB games within
+``MLB_PROP_LOOKBACK_DAYS`` (Req 9.2); Poisson fits discrete counting stats far
+better than a normal approximation. A stat with fewer prior games than
 ``MLB_PROP_MIN_SAMPLES`` is omitted entirely, with no odds (Req 9.3). The
-configured house margin makes the over/under implied probabilities sum to
-strictly more than 1 (Req 9.4). Samples derive only from MLB games before the
-target game's date, excluding the target game itself (Req 9.5).
+configured house margin makes each milestone's two-way (reaches / does-not-reach)
+implied probabilities sum to strictly more than 1 (Req 9.4). Samples derive only
+from MLB games before the target game's date, excluding the target game itself
+(Req 9.5).
+
+Each milestone is stored on a wager leg as ``line = threshold - 0.5`` with an
+``OVER`` direction so the existing ``value > line`` settlement grades ``N+``
+correctly (e.g. ``2+`` hits == OVER 1.5 == ``hits >= 2``).
 
 This module imports the league-neutral odds math from ``app.services.odds_math``
 only; it holds the baseball-specific stat vocabulary and applicability rules.
@@ -25,7 +34,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import timedelta
-import math
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,16 +43,24 @@ from app.api.schemas import (
     MLBGameRead,
     MLBPlayerPropLinesRead,
     MLBPropStatLineRead,
+    MLBPropThresholdRead,
 )
 from app.db.enums import Sport
 from app.db.models import Game, MLBPlayerGameStat, Player, Team
-from app.mlb.config import get_prop_lookback_days, get_prop_min_samples
+from app.mlb.config import get_prop_lookback_days, get_prop_max_games, get_prop_min_samples
 from app.mlb.enums import MLBStatType
 from app.services.odds_math import (
     american_from_probability,
     apply_two_way_margin_balanced,
-    normal_cdf,
+    poisson_at_least,
 )
+
+# Fixed "N-or-more" milestones offered for every MLB prop stat (Req: 1+/2+/3+).
+MLB_PROP_THRESHOLDS: tuple[int, ...] = (1, 2, 3)
+
+# Floor for the Poisson rate so a player with an all-zero (but qualifying)
+# history still produces finite, bettable long-shot odds instead of +inf.
+_MIN_POISSON_RATE = 0.05
 
 # Maps each MLB stat type to the column it reads on ``MLBPlayerGameStat``.
 _STAT_COLUMNS: dict[MLBStatType, str] = {
@@ -88,33 +104,36 @@ def _applicable_stats(primary_position: str | None) -> tuple[MLBStatType, ...]:
     return _PITCHER_STATS if _is_pitcher(primary_position) else _BATTER_STATS
 
 
-def _half_point_line(values: list[int]) -> float:
-    """Nearest half-point value (fractional part exactly 0.5) to the average."""
-    avg = sum(values) / len(values)
-    return float(round(avg - 0.5) + 0.5)
+def _threshold_ladder(values: list[int]) -> list[MLBPropThresholdRead]:
+    """Build the ``1+``/``2+``/``3+`` milestone ladder for one stat's history.
 
+    The Poisson rate is the player's rolling per-game average. For each
+    threshold the fair "reaches N+" probability is ``P(X >= N)``; the house
+    margin is applied to the two-way (reaches / does-not-reach) market so the
+    displayed price carries the book's overround.
+    """
+    lam = max(sum(values) / len(values), _MIN_POISSON_RATE)
 
-def _american_odds_pair(values: list[int], line: float) -> tuple[str, str]:
-    """Fair over/under American odds from a normal approximation, with house margin."""
-    mean = sum(values) / len(values)
-    if len(values) > 1:
-        variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
-        stddev = math.sqrt(max(variance, 0.0))
-    else:
-        stddev = 0.0
-    stddev = max(stddev, 1.0)
-
-    # Half-point lines admit no push; use the strict over probability.
-    p_over = 1.0 - normal_cdf(line, mean, stddev)
-    p_over = min(max(p_over, 0.02), 0.98)
-    p_over, p_under = apply_two_way_margin_balanced(p_over)
-    return (american_from_probability(p_over), american_from_probability(p_under))
+    ladder: list[MLBPropThresholdRead] = []
+    for threshold in MLB_PROP_THRESHOLDS:
+        p_yes_fair = poisson_at_least(threshold, lam)
+        p_yes, p_no = apply_two_way_margin_balanced(p_yes_fair)
+        ladder.append(
+            MLBPropThresholdRead(
+                threshold=threshold,
+                line=float(threshold) - 0.5,
+                american=american_from_probability(p_yes),
+                under_american=american_from_probability(p_no),
+            )
+        )
+    return ladder
 
 
 def build_mlb_game_prop_lines_bundle(db: Session, game: Game) -> MLBGamePropLinesBundle:
     """Build the MLB player-prop bundle for ``game`` (Requirement 9)."""
     lookback_days = get_prop_lookback_days()
     min_samples = get_prop_min_samples()
+    max_games = get_prop_max_games()
 
     roster_rows = db.execute(
         select(Player, Team.name, Team.mlb_team_id)
@@ -141,7 +160,10 @@ def build_mlb_game_prop_lines_bundle(db: Session, game: Game) -> MLBGamePropLine
             .order_by(MLBPlayerGameStat.player_id.asc(), Game.game_date.desc(), Game.id.desc())
         )
         for stat in db.scalars(stmt):
-            by_player[stat.player_id].append(stat)
+            bucket = by_player[stat.player_id]
+            if len(bucket) >= max_games:
+                continue
+            bucket.append(stat)
 
     players_build: list[MLBPlayerPropLinesRead] = []
     for player, team_name, team_mlb_id in roster_rows:
@@ -155,14 +177,10 @@ def build_mlb_game_prop_lines_bundle(db: Session, game: Game) -> MLBGamePropLine
                 continue
             column = _STAT_COLUMNS[stat_type]
             values = [getattr(s, column) for s in samples]
-            line = _half_point_line(values)
-            over_american, under_american = _american_odds_pair(values, line)
             stat_lines.append(
                 MLBPropStatLineRead(
                     stat_type=stat_type.value,
-                    line=line,
-                    over_american=over_american,
-                    under_american=under_american,
+                    thresholds=_threshold_ladder(values),
                 )
             )
 

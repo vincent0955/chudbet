@@ -44,9 +44,11 @@ API_BACKOFF_BASE_FLOOR_SEC = 0.0
 # --- Pricing / ingestion defaults (sensible baseball baselines) ---
 GAME_LOOKBACK_DEFAULT = 10          # prior MLB games used for game-market projections
 PROP_LOOKBACK_DAYS_DEFAULT = 30     # rolling window (days) for player-prop averages
-PROP_MIN_SAMPLES_DEFAULT = 5        # min prior games before a prop line is offered
+PROP_MIN_SAMPLES_DEFAULT = 3        # min prior games before a prop line is offered (NBA parity)
 GAME_MIN_SAMPLES_DEFAULT = 3        # min prior games before defaults kick in for markets
-SCHEDULE_MAX_DAYS_DEFAULT = 7       # max schedule ingestion window in days
+SCHEDULE_MAX_DAYS_DEFAULT = 7       # max forward schedule ingestion window in days
+SCHEDULE_LOOKBACK_DAYS_DEFAULT = PROP_LOOKBACK_DAYS_DEFAULT  # past days for finals + prop samples
+PROP_MAX_GAMES_DEFAULT = 10         # max prior games sampled per player (NBA parity)
 
 # --- Worker defaults ---
 WORKER_INGEST_INTERVAL_DEFAULT_RAW = "300"  # raw string; worker validates (task 6.2)
@@ -154,8 +156,18 @@ def get_game_min_samples() -> int:
 
 
 def get_schedule_max_days() -> int:
-    """Maximum schedule ingestion window in days (Req 4.1)."""
+    """Maximum forward schedule ingestion window in days (Req 4.1)."""
     return _get_int("MLB_SCHEDULE_MAX_DAYS", SCHEDULE_MAX_DAYS_DEFAULT)
+
+
+def get_schedule_lookback_days() -> int:
+    """Past days of schedule/box-score history to retain for prop pricing."""
+    return _get_int("MLB_SCHEDULE_LOOKBACK_DAYS", SCHEDULE_LOOKBACK_DAYS_DEFAULT)
+
+
+def get_prop_max_games() -> int:
+    """Maximum prior games sampled per player when building prop lines."""
+    return _get_int("MLB_PROP_MAX_GAMES", PROP_MAX_GAMES_DEFAULT)
 
 
 # --- Worker getters ---

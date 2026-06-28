@@ -20,6 +20,30 @@ def normal_cdf(x: float, mean: float, stddev: float) -> float:
     return 0.5 * (1.0 + math.erf(z))
 
 
+def poisson_at_least(threshold: int, lam: float) -> float:
+    """Probability a Poisson(``lam``) count reaches ``threshold`` or more.
+
+    Counting stats such as hits, total bases, RBI, runs, and pitcher strikeouts
+    are modeled as Poisson draws, which fits discrete "N-or-more" milestone
+    markets far better than a continuous normal approximation. Returns
+    ``P(X >= threshold) = 1 - sum_{k=0}^{threshold-1} e^{-lam} lam^k / k!``.
+
+    ``threshold <= 0`` is certain (returns ``1.0``); a non-positive ``lam`` is
+    floored to a tiny positive rate so the result stays in ``(0, 1)``.
+    """
+    if threshold <= 0:
+        return 1.0
+    lam = max(lam, 1e-9)
+    # Accumulate the lower-tail mass P(X < threshold) via the stable recurrence
+    # term_{k} = term_{k-1} * lam / k, starting from term_0 = e^{-lam}.
+    term = math.exp(-lam)
+    cdf = term
+    for k in range(1, threshold):
+        term *= lam / k
+        cdf += term
+    return max(0.0, min(1.0, 1.0 - cdf))
+
+
 def american_from_probability(p: float) -> str:
     """Convert an implied probability to an American-odds string.
 

@@ -1,7 +1,7 @@
 # Chudbet Deployment Runbook (EC2 + Docker Compose + Vercel)
 
 This runbook deploys the current application with always-on services at low cost:
-- EC2 hosts `postgres`, `backend`, `worker`, and `caddy`.
+- EC2 hosts `postgres`, `backend`, `worker`, `mlb-worker`, and `caddy`.
 - Vercel hosts the frontend.
 
 ## 1) Provision cloud prerequisites
@@ -35,6 +35,7 @@ Edit `.env.prod`:
 cd /opt/chudbet
 docker build -t chudbet-backend -f backend/Dockerfile ./backend
 docker build -t chudbet-worker -f backend/Dockerfile ./backend
+docker build -t chudbet-mlb-worker -f backend/Dockerfile ./backend
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
@@ -91,6 +92,7 @@ Run after each deploy:
 - place a small test parlay end-to-end
 - confirm worker activity in logs:
   - `docker compose -f docker-compose.prod.yml --env-file .env.prod logs worker --tail=200`
+  - `docker compose -f docker-compose.prod.yml --env-file .env.prod logs mlb-worker --tail=200`
 
 ## 8) Rollback
 
@@ -99,6 +101,7 @@ If deploy is unhealthy:
 2. Rebuild/restart:
    - `docker build -t chudbet-backend -f backend/Dockerfile ./backend`
    - `docker build -t chudbet-worker -f backend/Dockerfile ./backend`
+   - `docker build -t chudbet-mlb-worker -f backend/Dockerfile ./backend`
    - `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build`
 3. Re-check `/health` and key user flows.
 
@@ -117,6 +120,7 @@ The pipeline in `.github/workflows/ci-cd.yml` runs on every push and pull reques
    git reset --hard origin/main
    docker build -t chudbet-backend -f backend/Dockerfile ./backend
    docker build -t chudbet-worker -f backend/Dockerfile ./backend
+   docker build -t chudbet-mlb-worker -f backend/Dockerfile ./backend
    docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build
    docker image prune -f
    set -a && . ./.env.prod && set +a

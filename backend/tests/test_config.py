@@ -51,6 +51,7 @@ class TestGetCorsOrigins:
         origins = config.get_cors_origins()
         assert "http://localhost:5173" in origins
         assert "http://127.0.0.1:5173" in origins
+        assert "http://localhost:5174" in origins
 
     def test_parses_comma_separated_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CHUDBET_CORS_ORIGINS", "https://a.com, https://b.com")
