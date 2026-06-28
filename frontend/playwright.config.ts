@@ -29,5 +29,9 @@ export default defineConfig({
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // Direct API calls to :8000 so Playwright route mocks apply (see mockApi.ts).
+    env: {
+      VITE_API_URL: 'http://localhost:8000',
+    },
   },
 })
