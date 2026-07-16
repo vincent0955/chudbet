@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 REQUEST_PAUSE_SEC = 0.65
 NBA_CALENDAR_TZ = ZoneInfo("America/New_York")
 
+# ScoreboardV3 league IDs to pull per slate: "00" = NBA (regular season / playoffs),
+# "15" = Summer League. Summer League games never appear under "00".
+SCOREBOARD_LEAGUE_IDS = ("00", "15")
+
 
 def _pause() -> None:
     time.sleep(REQUEST_PAUSE_SEC)
@@ -480,6 +484,8 @@ def sync_games_from_scoreboard(
     """Upsert games from Stats ``ScoreboardV3`` for a small window around today.
 
     Covers same-day and upcoming games that ``LeagueGameFinder`` may omit or lag on.
+    Each slate is fetched once per league in ``SCOREBOARD_LEAGUE_IDS`` (NBA + Summer
+    League — Summer League games only appear under league ``15``).
     Team line rows list **home first**, **away second** (validated against ``gameCode``).
     """
     if days < 1:
@@ -494,90 +500,97 @@ def sync_games_from_scoreboard(
     for offset in range(-past_days, days):
         slate = today + timedelta(days=offset)
         date_str = slate.isoformat()
-        _pause()
-        try:
-            sb = scoreboardv3.ScoreboardV3(game_date=date_str)
-            dfs = sb.get_data_frames()
-        except Exception as exc:
-            logger.warning("Scoreboard fetch failed for %s: %s", date_str, exc)
-            continue
-
-        if len(dfs) < 3 or dfs[1] is None or dfs[1].empty:
-            logger.debug("Scoreboard: no games header rows on %s", date_str)
-            continue
-
-        games_hdr = dfs[1]
-        teams_lines = dfs[2]
-        if teams_lines is None or teams_lines.empty:
-            logger.warning("Scoreboard: missing team lines on %s", date_str)
-            continue
-
-        games_hdr = games_hdr.copy()
-        games_hdr["gameId"] = games_hdr["gameId"].map(normalize_nba_game_id_str)
-        teams_lines = teams_lines.copy()
-        teams_lines["gameId"] = teams_lines["gameId"].map(normalize_nba_game_id_str)
-
-        for _, hdr in games_hdr.iterrows():
-            nba_gid = str(hdr["gameId"]).strip()
-            status_txt = str(hdr.get("gameStatusText") or "").strip()[:64] or "scheduled"
-            tip_utc = _parse_game_time_utc(hdr.get("gameTimeUTC"))
-
-            sub = teams_lines[teams_lines["gameId"] == nba_gid]
-            if len(sub) != 2:
+        for league_id in SCOREBOARD_LEAGUE_IDS:
+            _pause()
+            try:
+                sb = scoreboardv3.ScoreboardV3(game_date=date_str, league_id=league_id)
+                dfs = sb.get_data_frames()
+            except Exception as exc:
                 logger.warning(
-                    "Scoreboard: skip game %s on %s: expected 2 team rows, got %d",
-                    nba_gid,
-                    date_str,
-                    len(sub),
+                    "Scoreboard fetch failed for %s (league %s): %s", date_str, league_id, exc
                 )
                 continue
 
-            home_nba_id = int(sub.iloc[0]["teamId"])
-            away_nba_id = int(sub.iloc[1]["teamId"])
-            home_score = _parse_score(sub.iloc[0].get("score"))
-            away_score = _parse_score(sub.iloc[1].get("score"))
-
-            home = teams_by_nba.get(home_nba_id)
-            away = teams_by_nba.get(away_nba_id)
-            if home is None or away is None:
-                logger.warning(
-                    "Scoreboard: skip game %s on %s: unknown team home=%s away=%s",
-                    nba_gid,
-                    date_str,
-                    home_nba_id,
-                    away_nba_id,
+            if len(dfs) < 3 or dfs[1] is None or dfs[1].empty:
+                logger.debug(
+                    "Scoreboard: no games header rows on %s (league %s)", date_str, league_id
                 )
                 continue
 
-            existing = session.scalar(select(Game).where(Game.nba_game_id == nba_gid))
-            if existing is None:
-                existing = Game(
-                    nba_game_id=nba_gid,
-                    home_team_id=home.id,
-                    away_team_id=away.id,
-                    game_date=slate,
-                    game_time_utc=tip_utc,
-                    home_score=home_score,
-                    away_score=away_score,
-                    status=status_txt,
+            games_hdr = dfs[1]
+            teams_lines = dfs[2]
+            if teams_lines is None or teams_lines.empty:
+                logger.warning(
+                    "Scoreboard: missing team lines on %s (league %s)", date_str, league_id
                 )
-                session.add(existing)
-            else:
-                existing.home_team_id = home.id
-                existing.away_team_id = away.id
-                existing.status = status_txt[:64]
-                if tip_utc is not None:
-                    existing.game_time_utc = tip_utc
-                if _is_final_status_text(status_txt):
-                    existing.home_score = home_score
-                    existing.away_score = away_score
+                continue
+
+            games_hdr = games_hdr.copy()
+            games_hdr["gameId"] = games_hdr["gameId"].map(normalize_nba_game_id_str)
+            teams_lines = teams_lines.copy()
+            teams_lines["gameId"] = teams_lines["gameId"].map(normalize_nba_game_id_str)
+
+            for _, hdr in games_hdr.iterrows():
+                nba_gid = str(hdr["gameId"]).strip()
+                status_txt = str(hdr.get("gameStatusText") or "").strip()[:64] or "scheduled"
+                tip_utc = _parse_game_time_utc(hdr.get("gameTimeUTC"))
+
+                sub = teams_lines[teams_lines["gameId"] == nba_gid]
+                if len(sub) != 2:
+                    logger.warning(
+                        "Scoreboard: skip game %s on %s: expected 2 team rows, got %d",
+                        nba_gid,
+                        date_str,
+                        len(sub),
+                    )
+                    continue
+
+                home_nba_id = int(sub.iloc[0]["teamId"])
+                away_nba_id = int(sub.iloc[1]["teamId"])
+                home_score = _parse_score(sub.iloc[0].get("score"))
+                away_score = _parse_score(sub.iloc[1].get("score"))
+
+                home = teams_by_nba.get(home_nba_id)
+                away = teams_by_nba.get(away_nba_id)
+                if home is None or away is None:
+                    logger.warning(
+                        "Scoreboard: skip game %s on %s: unknown team home=%s away=%s",
+                        nba_gid,
+                        date_str,
+                        home_nba_id,
+                        away_nba_id,
+                    )
+                    continue
+
+                existing = session.scalar(select(Game).where(Game.nba_game_id == nba_gid))
+                if existing is None:
+                    existing = Game(
+                        nba_game_id=nba_gid,
+                        home_team_id=home.id,
+                        away_team_id=away.id,
+                        game_date=slate,
+                        game_time_utc=tip_utc,
+                        home_score=home_score,
+                        away_score=away_score,
+                        status=status_txt,
+                    )
+                    session.add(existing)
                 else:
-                    if home_score is not None:
-                        existing.home_score = home_score if existing.home_score is None else max(existing.home_score, home_score)
-                    if away_score is not None:
-                        existing.away_score = away_score if existing.away_score is None else max(existing.away_score, away_score)
+                    existing.home_team_id = home.id
+                    existing.away_team_id = away.id
+                    existing.status = status_txt[:64]
+                    if tip_utc is not None:
+                        existing.game_time_utc = tip_utc
+                    if _is_final_status_text(status_txt):
+                        existing.home_score = home_score
+                        existing.away_score = away_score
+                    else:
+                        if home_score is not None:
+                            existing.home_score = home_score if existing.home_score is None else max(existing.home_score, home_score)
+                        if away_score is not None:
+                            existing.away_score = away_score if existing.away_score is None else max(existing.away_score, away_score)
 
-            touched.append(existing)
+                touched.append(existing)
 
     session.flush()
     logger.info(

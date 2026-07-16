@@ -140,6 +140,17 @@ export function GamePropBoard({ bundle, slipGameHeader, wageringLocked }: Props)
     return [...awayTop, ...homeTop]
   }
 
+  // NBA Stats game IDs are prefixed by league: "15…" = Summer League.
+  const isSummerLeague = (game.nba_game_id ?? '').startsWith('15')
+
+  if (isSummerLeague) {
+    return (
+      <section className="card game-props game-props--empty">
+        <p className="muted">Props aren&apos;t available for Summer League.</p>
+      </section>
+    )
+  }
+
   if (ordered.length === 0) {
     return (
       <section className="card game-props game-props--empty">

@@ -19,6 +19,13 @@ from app.services.odds_math import (
 GAME_PROP_LOOKBACK = 10
 GAME_PROP_MIN_SAMPLES = 3
 
+# NBA Stats game IDs are prefixed by league: "00…" = NBA, "15…" = Summer League.
+SUMMER_LEAGUE_GAME_ID_PREFIX = "15"
+
+
+def is_summer_league_game(game: Game) -> bool:
+    return (game.nba_game_id or "").startswith(SUMMER_LEAGUE_GAME_ID_PREFIX)
+
 
 def _half_point_line(values: list[int]) -> float | None:
     """Nearest prop line that **always ends in .5** (never 22.0 — only …21.5, 22.5…)."""
@@ -48,6 +55,16 @@ def _american_odds_pair_from_history(values: list[int], line: float | None) -> t
 
 
 def build_game_prop_lines_bundle(db: Session, game: Game) -> GamePropLinesBundle:
+    # Summer League rosters aren't ingested, and regular-season lines don't apply to
+    # those games — return no prop players so nothing misleading is offered.
+    if is_summer_league_game(game):
+        return GamePropLinesBundle(
+            game=GameRead.model_validate(game),
+            lookback=GAME_PROP_LOOKBACK,
+            min_samples=GAME_PROP_MIN_SAMPLES,
+            players=[],
+        )
+
     roster_rows = db.execute(
         select(Player, Team.name, Team.nba_team_id)
         .join(Team, Player.team_id == Team.id)
