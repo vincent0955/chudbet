@@ -20,6 +20,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: chudbet-backend
     ports:
       - "8000:8000"
     environment:
@@ -37,9 +38,9 @@ services:
         condition: service_healthy
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Reuses the image built by the backend service; only the command differs.
+    image: chudbet-backend
+    pull_policy: never
     command: ["python", "-m", "app.worker.main"]
     environment:
       POSTGRES_HOST: postgres
@@ -63,9 +64,9 @@ services:
         condition: service_healthy
 
   mlb-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Reuses the image built by the backend service; only the command differs.
+    image: chudbet-backend
+    pull_policy: never
     command: ["python", "-m", "app.worker.mlb_main"]
     environment:
       POSTGRES_HOST: postgres

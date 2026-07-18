@@ -70,10 +70,11 @@ npm run test:e2e
 
 GitHub Actions (`.github/workflows/ci-cd.yml`) runs all the test suites above on
 every push and pull request to `main`. When tests pass on a push to `main`, it
-assumes an AWS role via GitHub OIDC and uses AWS Systems Manager (SSM) to redeploy
-the backend on EC2 (`git reset --hard`, `docker build`, then
-`docker compose -f docker-compose.prod.yml up -d --no-build`) — no inbound SSH and no
-static AWS keys.
+builds the backend image once on the runner, pushes it to Amazon ECR (tagged with
+the commit SHA), then assumes an AWS role via GitHub OIDC and uses AWS Systems
+Manager (SSM) to redeploy on EC2 — the box just pulls the image and runs
+`docker compose -f docker-compose.prod.yml up -d --no-build`; it never builds.
+No inbound SSH and no static AWS keys.
 
 ## Screenshots
 

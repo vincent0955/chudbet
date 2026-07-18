@@ -18,10 +18,9 @@ services:
       - app_net
 
   backend:
-    image: chudbet-backend
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Set by the deploy pipeline in .env.prod to the ECR image for the deployed
+    # commit (e.g. <account>.dkr.ecr.<region>.amazonaws.com/chudbet-backend:<sha>).
+    image: ${BACKEND_IMAGE:-chudbet-backend}
     restart: unless-stopped
     environment:
       POSTGRES_HOST: postgres
@@ -58,10 +57,8 @@ services:
       - app_net
 
   worker:
-    image: chudbet-worker
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Same image as backend; only the command differs.
+    image: ${BACKEND_IMAGE:-chudbet-backend}
     command: ["python", "-m", "app.worker.main"]
     restart: unless-stopped
     environment:
@@ -87,10 +84,8 @@ services:
       - app_net
 
   mlb-worker:
-    image: chudbet-mlb-worker
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # Same image as backend; only the command differs.
+    image: ${BACKEND_IMAGE:-chudbet-backend}
     command: ["python", "-m", "app.worker.mlb_main"]
     restart: unless-stopped
     environment:

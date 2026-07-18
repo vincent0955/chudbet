@@ -31,11 +31,18 @@ Edit `.env.prod`:
 
 ## 3) Start backend stack
 
+The app image is built by CI and pulled from ECR (see section 9); the box never
+builds images. `backend`, `worker`, and `mlb-worker` all run the same image
+(`BACKEND_IMAGE` in `.env.prod`) with different commands.
+
+For the very first start (before CI has ever deployed), either let the first
+push to `main` do everything, or pull an image manually:
+
 ```bash
 cd /opt/chudbet
-docker build -t chudbet-backend -f backend/Dockerfile ./backend
-docker build -t chudbet-worker -f backend/Dockerfile ./backend
-docker build -t chudbet-mlb-worker -f backend/Dockerfile ./backend
+aws ecr get-login-password --region <REGION> | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
+echo 'BACKEND_IMAGE=<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/chudbet-backend:latest' >> .env.prod
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull backend
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
@@ -96,14 +103,19 @@ Run after each deploy:
 
 ## 8) Rollback
 
-If deploy is unhealthy:
-1. Revert to previous commit on EC2.
-2. Rebuild/restart:
-   - `docker build -t chudbet-backend -f backend/Dockerfile ./backend`
-   - `docker build -t chudbet-worker -f backend/Dockerfile ./backend`
-   - `docker build -t chudbet-mlb-worker -f backend/Dockerfile ./backend`
+Every deploy pushes an image tagged with its git SHA, so rollback is just
+pointing `BACKEND_IMAGE` at a previous good SHA — no rebuild:
+
+1. Find the last good commit SHA (`git log` or the GitHub Actions history).
+2. On the box, edit `.env.prod`:
+   `BACKEND_IMAGE=<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/chudbet-backend:<good-sha>`
+3. Restart:
+   - `docker compose -f docker-compose.prod.yml --env-file .env.prod pull backend`
    - `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build`
-3. Re-check `/health` and key user flows.
+4. Re-check `/health` and key user flows.
+
+Note the next push to `main` overwrites `BACKEND_IMAGE` again — revert or fix
+the bad commit in git too, or the following deploy re-ships it.
 
 ## 9) CI/CD (GitHub Actions)
 
@@ -112,17 +124,18 @@ The pipeline in `.github/workflows/ci-cd.yml` runs on every push and pull reques
 1. `backend-tests` — `pytest` (uses in-memory SQLite, no Postgres needed).
 2. `frontend-tests` — ESLint, Vitest, and a type-checked build.
 3. `e2e-tests` — Playwright E2E (with the report uploaded as an artifact on failure).
-4. `deploy` — only on a push to `main`, and only after all three test jobs pass. It assumes an AWS role via **GitHub OIDC** (no long-lived AWS keys, no inbound SSH) and uses **AWS Systems Manager (SSM)** `send-command` to run the same steps you would by hand on the instance:
+4. `build-and-push` — only on a push to `main`, after all three test jobs pass. Builds the backend image **once** on the GitHub runner (with a GitHub-Actions-backed layer cache) and pushes it to ECR tagged with the commit SHA and `latest`. One image serves `backend`, `worker`, and `mlb-worker`.
+5. `deploy` — after the push succeeds. It assumes an AWS role via **GitHub OIDC** (no long-lived AWS keys, no inbound SSH) and uses **AWS Systems Manager (SSM)** `send-command` to run the same steps you would by hand on the instance:
 
    ```bash
    cd /opt/chudbet
-   git fetch --all
+   git fetch --all                      # keeps compose/Caddy config in sync; no builds happen here
    git reset --hard origin/main
-   docker build -t chudbet-backend -f backend/Dockerfile ./backend
-   docker build -t chudbet-worker -f backend/Dockerfile ./backend
-   docker build -t chudbet-mlb-worker -f backend/Dockerfile ./backend
+   aws ecr get-login-password --region <REGION> | docker login --username AWS --password-stdin <REGISTRY>
+   # pin BACKEND_IMAGE=<registry>/chudbet-backend:<sha> in .env.prod
+   docker compose -f docker-compose.prod.yml --env-file .env.prod pull backend
    docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-build
-   docker image prune -f
+   docker image prune -af --filter until=72h
    set -a && . ./.env.prod && set +a
    curl -fsS "https://${API_DOMAIN}/health"
    ```
@@ -158,7 +171,7 @@ One-time AWS setup:
    }
    ```
 
-4. **Attach a permissions policy** to that role allowing it to run a command on the one instance and read the result (replace `<REGION>`, `<ACCOUNT_ID>`, `<INSTANCE_ID>`):
+4. **Attach a permissions policy** to that role allowing it to run a command on the one instance, read the result, and push to ECR (replace `<REGION>`, `<ACCOUNT_ID>`, `<INSTANCE_ID>`):
 
    ```json
    {
@@ -176,10 +189,44 @@ One-time AWS setup:
          "Effect": "Allow",
          "Action": ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations", "ssm:ListCommands"],
          "Resource": "*"
+       },
+       {
+         "Effect": "Allow",
+         "Action": "ecr:GetAuthorizationToken",
+         "Resource": "*"
+       },
+       {
+         "Effect": "Allow",
+         "Action": [
+           "ecr:BatchCheckLayerAvailability",
+           "ecr:GetDownloadUrlForLayer",
+           "ecr:BatchGetImage",
+           "ecr:PutImage",
+           "ecr:InitiateLayerUpload",
+           "ecr:UploadLayerPart",
+           "ecr:CompleteLayerUpload"
+         ],
+         "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/chudbet-backend"
        }
      ]
    }
    ```
+
+5. **Create the ECR repository** (once):
+
+   ```bash
+   aws ecr create-repository --repository-name chudbet-backend --region <REGION> \
+     --image-scanning-configuration scanOnPush=true
+   ```
+
+   Add a lifecycle policy so old SHA tags don't accumulate storage cost forever:
+
+   ```bash
+   aws ecr put-lifecycle-policy --repository-name chudbet-backend --region <REGION> \
+     --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"expire untagged","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":7},"action":{"type":"expire"}},{"rulePriority":2,"description":"keep last 20","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}'
+   ```
+
+6. **Let the instance pull from ECR.** Attach the managed policy `AmazonEC2ContainerRegistryReadOnly` to the EC2 **instance** role (the same instance profile that has `AmazonSSMManagedInstanceCore`).
 
 ### Required repository secrets
 
@@ -196,4 +243,5 @@ Notes:
 - `git reset --hard origin/main` discards any local commits on the server by design; `.env.prod` is untracked and therefore preserved.
 - DB schema changes need no extra step — backend startup runs `Base.metadata.create_all` + `ensure_postgres_schema` (`backend/app/main.py`).
 - The job prints the script's stdout/stderr from SSM and fails the build if the invocation status is not `Success` (so a failed `/health` check fails the deploy).
-- Images are built with `docker build` (not `docker compose build`) because older EC2 Docker installs may lack Buildx 0.17+, which newer Compose requires for `--build`.
+- The box never builds images — it only pulls the CI-built image from ECR. The repo checkout on the box exists solely to keep `docker-compose.prod.yml` and `infra/caddy/Caddyfile` in sync.
+- `docker image prune -af --filter until=72h` cleans up superseded SHA-tagged images (in-use images are never pruned); rollback doesn't need them locally since it re-pulls from ECR.
