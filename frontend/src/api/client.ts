@@ -39,7 +39,7 @@ async function readBody(res: Response): Promise<unknown> {
 }
 
 /**
- * Typed JSON fetch against the Chudbet API. Throws {@link ApiError} on non-OK responses.
+ * Typed JSON fetch against the OppositeBet API. Throws {@link ApiError} on non-OK responses.
  */
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const url = joinUrl(getApiBaseUrl(), path)

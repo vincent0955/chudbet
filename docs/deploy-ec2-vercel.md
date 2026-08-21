@@ -1,6 +1,6 @@
-# Chudbet Deployment Runbook (EC2 + Docker Compose + Vercel)
+# OppositeBet Deployment Runbook (EC2 + Docker Compose + Vercel)
 
-This runbook deploys the current application with always-on services at low cost:
+This runbook deploys the current application with always-on services at low cost. Legacy internal infrastructure identifiers such as `/opt/chudbet`, `CHUDBET_*`, and `chudbet-backend` are intentionally retained to preserve production state and rollback compatibility:
 - EC2 hosts `postgres`, `backend`, `worker`, `mlb-worker`, and `caddy`.
 - Vercel hosts the frontend.
 
@@ -165,7 +165,7 @@ One-time AWS setup:
        "Action": "sts:AssumeRoleWithWebIdentity",
        "Condition": {
          "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-         "StringLike": { "token.actions.githubusercontent.com:sub": "repo:vincent0955/chudbet:ref:refs/heads/main" }
+         "StringLike": { "token.actions.githubusercontent.com:sub": "repo:vincent0955/oppositebet:ref:refs/heads/main" }
        }
      }]
    }

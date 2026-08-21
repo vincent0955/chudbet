@@ -1,6 +1,6 @@
-# ChudBet
+# OppositeBet
 
-ChudBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet on only a certain amount of legs hitting.
+OppositeBet is a sportsbook that allows you to bet on your parlays to NOT hit or bet on only a certain amount of legs hitting.
 
 ## How it works
 

@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Chudbet API", lifespan=lifespan)
+app = FastAPI(title="OppositeBet API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

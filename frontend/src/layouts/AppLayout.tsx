@@ -23,7 +23,7 @@ export function AppLayout() {
         <div className="app-header__inner">
           <div className="app-header__left">
             <Link to="/" className="app-brand">
-              ChudBet
+              OppositeBet
             </Link>
             <nav className="app-nav" aria-label="Main">
               <NavLink
